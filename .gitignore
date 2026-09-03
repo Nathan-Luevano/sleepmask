@@ -1,0 +1,18 @@
+# build artifacts
+build/
+*.bin
+*.o
+*.obj
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.venv/
+
+# editors / os
+.DS_Store
+*.swp
+*~
