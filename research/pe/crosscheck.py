@@ -1,5 +1,26 @@
 #!/usr/bin/env python3
-"""Cross-check helper (offline table vs runtime trace)."""
+"""Cross-check helper (offline table vs runtime trace).
+
+Resolves the offline syscall table from the PE fixture, runs the runtime
+harness, and cross-checks the harness's observed syscall trace against the
+offline table. The shellcode must be assembled first (build/sleepmask.bin).
+"""
+
+import subprocess
+import sys
+from pathlib import Path
+
+from syscall_table import syscall_table
+
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parent.parent
+NTDLL = HERE / "ntdll.dll"
+HARNESS = ROOT / "malware" / "sleepmask-loader" / "test" / "run_harness.py"
+
+LABELS = ["NtDelayExecution", "NtProtectVirtualMemory", "KeQuerySystemTime"]
+PRESENT = ["NtProtectVirtualMemory"]
+ABSENT = ["NtDelayExecution", "KeQuerySystemTime"]
+
 
 def parse_trace(stdout: str) -> list[int]:
     """Return the base-16 integers written on the line that starts with 'syscalls:'.
@@ -67,3 +88,39 @@ def check_consistency(expected, trace, present, absent):
         reasons.append("trace 0x%02x not in expected" % n)
 
     return len(reasons) == 0, reasons
+
+
+def main() -> int:
+    data = NTDLL.read_bytes()
+    offline = {row["name"]: row["value"] for row in syscall_table(data)}
+    expected = {name: offline.get(name) for name in LABELS}
+
+    print("offline table (%s):" % NTDLL.name)
+    for name in LABELS:
+        value = expected[name]
+        print("  %-24s %s" % (name, ("0x%02x" % value) if value is not None else "?"))
+
+    cmd = ["micromamba", "run", "-n", "mdev", "python", str(HARNESS)]
+    proc = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
+    if proc.returncode != 0:
+        sys.stdout.write(proc.stdout)
+        sys.stderr.write(proc.stderr)
+        print("cross-check: FAIL (harness exited %d)" % proc.returncode)
+        return 1
+
+    trace = parse_trace(proc.stdout)
+    print("runtime trace (harness):")
+    print("  " + (" ".join("0x%02x" % n for n in trace) or "(empty)"))
+
+    ok, reasons = check_consistency(expected, trace, PRESENT, ABSENT)
+    if ok:
+        print("cross-check: PASS")
+        return 0
+    print("cross-check: FAIL")
+    for reason in reasons:
+        print("  - " + reason)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
