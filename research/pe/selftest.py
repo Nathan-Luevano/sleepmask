@@ -88,7 +88,7 @@ def main() -> int:
         import make_fixture
         make_fixture.main()
     data = fixture.read_bytes()
-    checks = (check_pe_exports, check_syscall_table, check_emit, check_thunk)
+    checks = (check_pe_exports, check_syscall_table, check_emit, check_thunk, check_roundtrip)
     results = []
     for check in checks:
         results.extend(check(data))
