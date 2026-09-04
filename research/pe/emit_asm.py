@@ -1,3 +1,6 @@
+from syscall_table import syscall_table
+
+
 def render_equ(rows: list) -> str:
     """Return a text block with one output line per dict in rows.
 
@@ -18,3 +21,13 @@ def render_equ(rows: list) -> str:
         else f'; SYS_{row["name"]} not a syscall stub'
         for row in rows
     )
+
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) != 2:
+        print("usage: python emit_asm.py <pe-file>", file=sys.stderr)
+        sys.exit(2)
+    with open(sys.argv[1], "rb") as f:
+        data = f.read()
+    print(render_equ(syscall_table(data)))
