@@ -2,6 +2,7 @@
 
 from emit_asm import render_equ
 from pe_exports import pe_exports
+from pathlib import Path
 from syscall_table import find_stub_imm, syscall_table
 
 
@@ -42,3 +43,25 @@ def check_emit(data: bytes) -> list[tuple[str, bool]]:
         ("render_equ output", render_equ(rows) == expected),
         ("render_equ empty", render_equ([]) == ""),
     ]
+
+
+def main() -> int:
+    """Run every check against the fixture and print a report."""
+    fixture = Path(__file__).with_name("sample.dll")
+    if not fixture.exists():
+        import make_fixture
+        make_fixture.main()
+    data = fixture.read_bytes()
+    checks = (check_pe_exports, check_syscall_table, check_emit)
+    results = []
+    for check in checks:
+        results.extend(check(data))
+    failed = sum(1 for _, ok in results if not ok)
+    for label, ok in results:
+        print(("ok    " if ok else "FAIL  ") + label)
+    print(f"{len(results) - failed}/{len(results)} checks passed")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
