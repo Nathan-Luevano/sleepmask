@@ -20,3 +20,16 @@ def syscall_table(data: bytes) -> list:
         {"name": export["name"], "value": find_stub_imm(export["body"])}
         for export in pe_exports(data)
     ]
+
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) != 2:
+        print("usage: python syscall_table.py <file>", file=sys.stderr)
+        sys.exit(2)
+    with open(sys.argv[1], "rb") as f:
+        data = f.read()
+    for row in syscall_table(data):
+        value = row["value"]
+        text = "0x%02x" % value if value is not None else "?"
+        print("%-16s %s" % (row["name"], text))
