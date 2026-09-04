@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Build a minimal x64 PE DLL with two named exports (test fixture).
+"""Build a minimal x64 PE DLL with three named exports (test fixture).
 
-Each export's body is a 4-instruction stub:
+Two exports use a 4-instruction syscall stub:
     B8 <imm32 LE>  0F 05  C3        ; mov eax, imm; <0F 05>; ret
+The third (FuncThree) shares the leading B8 but is NOT a syscall stub:
+    B8 <imm32 LE>  C3 00 00         ; mov eax, imm; ret; pad
 Layout is chosen so the single section has VirtualAddress == PointerToRawData
 (0x200), which makes RVA -> file offset the identity. That keeps the fixture
 tiny while still exercising a correct section-based RVA translation.
