@@ -28,3 +28,17 @@ def check_syscall_table(data: bytes) -> list[tuple[str, bool]]:
         ("find_stub_imm short", find_stub_imm(stub[:6]) is None),
         ("find_stub_imm not stub", find_stub_imm(not_stub) is None),
     ]
+
+
+def check_emit(data: bytes) -> list[tuple[str, bool]]:
+    """Return (label, ok) pairs for render_equ checks."""
+    rows = syscall_table(data)
+    expected = (
+        "SYS_FuncOne equ 0x0000002b"
+        "\nSYS_FuncTwo equ 0x0000005a"
+        "\n; SYS_FuncThree not a syscall stub"
+    )
+    return [
+        ("render_equ output", render_equ(rows) == expected),
+        ("render_equ empty", render_equ([]) == ""),
+    ]
