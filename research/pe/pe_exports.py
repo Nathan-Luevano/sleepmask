@@ -96,3 +96,26 @@ def pe_exports(data: bytes) -> list:
         })
 
     return exports
+
+
+if __name__ == "__main__":
+    import sys
+
+    if len(sys.argv) != 2:
+        print("usage: python pe_exports.py <pe-file>", file=sys.stderr)
+        sys.exit(2)
+
+    with open(sys.argv[1], "rb") as f:
+        data = f.read()
+
+    for export in pe_exports(data):
+        print(
+            "%-20s  ordinal=%-4d  rva=0x%04x  imm=0x%08x  %s"
+            % (
+                export["name"],
+                export["ordinal"],
+                export["rva"],
+                export["imm32"] if export["imm32"] is not None else 0,
+                export["body"].hex(),
+            )
+        )
