@@ -150,6 +150,10 @@ beacon ran. The beacon preserved every register the host was holding.
 
 IF IT FAILS / MISFIRES
 -----------------------
+- Windows: if double-clicking says "This app can't run on your PC", stop
+  chasing the .exe — double-click diagnose.bat instead and send me that whole
+  window. It reports your real CPU architecture and the actual error the .exe
+  throws when launched from a command line.
 - Windows: if it faults, the Windows Error Reporting dialog shows the exact
   faulting module offset. Note/screenshot it and send it back.
 - Windows: if stdout is empty but the process exited, the report is in
@@ -160,6 +164,48 @@ IF IT FAILS / MISFIRES
 - Send back: the exact command you ran, the full stdout/stderr, the exit code
   (echo $?), and your OS + architecture.
 RUNME
+
+cat > build/native-test/diagnose.bat <<'BAT'
+@echo off
+setlocal
+echo ============================================================
+echo  sleepmask diagnostics
+echo  Double-clicking the .exe said "can't run"? Run THIS instead.
+echo  When it finishes, send me this whole window.
+echo ============================================================
+echo.
+echo [CPU architecture]
+echo   PROCESSOR_ARCHITECTURE = %PROCESSOR_ARCHITECTURE%
+echo.
+echo [System type]
+systeminfo | findstr /C:"System Type"
+echo.
+echo [OS name / version]
+systeminfo | findstr /C:"OS Name" /C:"OS Version"
+echo.
+echo ============================================================
+echo  TEST 1 of 2 : probe_windows.exe
+echo  (expect a multi-line report, then EXIT CODE 0)
+echo ============================================================
+probe_windows.exe
+echo   probe_windows.exe EXIT CODE = %ERRORLEVEL%
+echo.
+echo ============================================================
+echo  TEST 2 of 2 : inject_win.exe
+echo  (expect two lines, then EXIT CODE 42)
+echo ============================================================
+inject_win.exe
+echo   inject_win.exe EXIT CODE = %ERRORLEVEL%
+echo.
+echo ============================================================
+echo  DONE.
+echo  If a test above printed an error (e.g. "can't run", "not a
+echo  valid Win32 application", a 0x... code), that message is the
+echo  important part. Send all of this window back.
+echo ============================================================
+pause
+BAT
+sed -i 's/$/\r/' build/native-test/diagnose.bat
 
 echo
 echo "bundle ready in build/native-test/:"
