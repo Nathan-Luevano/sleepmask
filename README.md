@@ -131,6 +131,7 @@ malware/sleepmask-loader/
   build.sh             nasm every .asm → build/*.bin
   test_all.sh          the 8-layer matrix, one command
   test/                deployables + host-coupling (linux/win/macos) + harness
+  test/regen_media.py  regenerate + byte-diff the blog's media captures
 blogs/<slug>/          the field notes, one dir per post, real captured output
 research/pe/           stdlib-only PE reader + offline syscall-stub toolchain
 ```
