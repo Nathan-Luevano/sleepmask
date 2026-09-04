@@ -3,6 +3,7 @@ build/
 *.bin
 *.o
 *.obj
+*.exe
 *.dll
 
 # python
@@ -12,6 +13,18 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 .venv/
+.micromamba/
+
+# private session files (kept locally, not shipped)
+HANDOVER.md
+AGENTS.md
+blogs/
+
+# local environment / tooling
+.env
+.opencode/
+.vscode/
+node_modules/
 
 # editors / os
 .DS_Store
