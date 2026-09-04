@@ -74,7 +74,10 @@ fails):
 Build both (plus the rest) with `bash build.sh` and
 `micromamba run -n mdev python tools/mk_pe.py build/probe_windows.bin
 build/probe_windows.exe --console`; validate the Windows blob offline with
-`micromamba run -n mdev python tests/test_probe_windows.py`.
+`micromamba run -n mdev python tests/test_probe_windows.py`. Or just run
+`bash tools/make_native_test.sh`, which builds both and stages them together
+with a run-me note in `build/native-test/` — copy that folder to the target
+machine and run the two binaries per its `RUN-ME.txt`.
 
 ## The three mechanisms, precisely
 
