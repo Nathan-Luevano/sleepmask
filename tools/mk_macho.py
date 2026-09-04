@@ -16,7 +16,10 @@ self-injection, no trampoline, no ntdll. It is PIC (one RIP-relative lea),
 so the kernel may map __TEXT at any slide; the test re-runs it at a non-zero
 slide to prove the slide tolerance.
 
-usage: mk_macho.py [out.macho]   (default: build/sleepmask_macho)
+usage: mk_macho.py [out.macho] [payload.bin]
+  out.macho     default: build/sleepmask_macho
+  payload.bin   default: build/payload_macos.bin (the 81 B beacon); pass a
+                different blob (e.g. build/host_macos.bin) to wrap it instead
 """
 
 import struct
@@ -108,13 +111,14 @@ def make_macho(payload: bytes) -> bytes:
 
 
 def main() -> None:
-    payload = PAYLOAD_PATH.read_bytes()
     out = Path(sys.argv[1]) if len(sys.argv) > 1 else HERE / "build" / "sleepmask_macho"
+    payload_path = Path(sys.argv[2]) if len(sys.argv) > 2 else PAYLOAD_PATH
+    payload = payload_path.read_bytes()
     data = make_macho(payload)
     out.write_bytes(data)
     print(
-        f"wrote {out} ({len(data)} bytes); payload {len(payload)} B at file +{TEXT_SECT_OFF:#x}, "
-        f"entry vaddr 0x{TEXT_VMADDR + TEXT_SECT_OFF:X}"
+        f"wrote {out} ({len(data)} bytes); payload {len(payload)} B ({payload_path.name}) "
+        f"at file +{TEXT_SECT_OFF:#x}, entry vaddr 0x{TEXT_VMADDR + TEXT_SECT_OFF:X}"
     )
 
 
