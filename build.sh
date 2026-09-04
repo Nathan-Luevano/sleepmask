@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 mkdir -p build
 for src in src/*.asm; do
-  name="${src%.asm}"
+  name="$(basename "${src%.asm}")"
   nasm -g -f bin -o "build/${name}.bin" "${src}"
   echo "assembled build/${name}.bin ($(stat -c%s "build/${name}.bin") bytes)"
 done
