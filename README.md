@@ -53,6 +53,29 @@ All blobs are **position-independent** — RIP-relative / `call [rel]`-resolved
 addresses only — so they run at any base. The macOS test re-runs the image at
 a `+0x1000` slide to prove the property rather than assert it.
 
+## Run it on real hardware (the native probes)
+
+The Windows/macOS layers above are proven only under emulation. To close the
+loop on real hardware there is a **probe** — a harmless, self-contained blob
+that runs the whole resolution chain and reports what it sees, so you can run
+it on your own machine and read the result (or send the output back if a step
+fails):
+
+- **Windows 11 (x64):** run `build/probe_windows.exe` in a console. It walks
+  the PEB → `ntdll` → export directory, reads four syscall numbers
+  (`NtTerminateCurrentProcessEx`, `NtWriteFile`, `NtCreateFile`, `NtClose`)
+  out of the live export stubs, writes `sleepmask_probe.txt` next to it, prints
+  the same report to stdout, and exits `0`. No network, no other process
+  touched. A fault pins the exact failing offset.
+- **macOS (Intel x86-64; Apple Silicon under Rosetta):** run
+  `build/sleepmask_macho`. It emits `sleepmask: armed | macos x86-64 |
+  self-injected` and exits `0`.
+
+Build both (plus the rest) with `bash build.sh` and
+`micromamba run -n mdev python tools/mk_pe.py build/probe_windows.bin
+build/probe_windows.exe --console`; validate the Windows blob offline with
+`micromamba run -n mdev python tests/test_probe_windows.py`.
+
 ## The three mechanisms, precisely
 
 **Runtime resolution (the Windows blob).** No imports means the syscall
