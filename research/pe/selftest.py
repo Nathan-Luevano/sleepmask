@@ -4,6 +4,7 @@ from emit_asm import render_equ
 from emit_thunk import thunk_bytes
 from pe_exports import pe_exports
 from pathlib import Path
+from roundtrip import roundtrip
 from syscall_table import find_stub_imm, syscall_table
 
 
@@ -69,6 +70,14 @@ def check_thunk(data: bytes) -> list[tuple[str, bool]]:
         ),
         ("thunk range low", low_raises),
         ("thunk range high", high_raises),
+    ]
+
+
+def check_roundtrip(data: bytes) -> list[tuple[str, bool]]:
+    rows = roundtrip(pe_exports(data))
+    return [
+        ("roundtrip numbers", [r["number"] for r in rows] == [0x2B, 0x5A, None]),
+        ("roundtrip matched", [r["matched"] for r in rows] == [True, True, None]),
     ]
 
 
