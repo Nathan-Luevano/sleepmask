@@ -13,8 +13,9 @@ Run:  python make_fixture.py     -> writes sample.dll next to this file
 import os
 
 EXPORTS = [
-    ("FuncOne", 0x0000002B),
-    ("FuncTwo", 0x0000005A),
+    ("FuncOne", bytes.fromhex("B82B0000000F05C3")),
+    ("FuncTwo", bytes.fromhex("B85A0000000F05C3")),
+    ("FuncThree", bytes.fromhex("B807000000C30000")),
 ]
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sample.dll")
@@ -85,13 +86,12 @@ def main() -> None:
     img[ED + 0x24:ED + 0x28] = (ORD).to_bytes(4, "little")
 
     # --- EAT / ENT / ORD / names / bodies ---
-    for i, (name, imm) in enumerate(EXPORTS):
+    for i, (name, body) in enumerate(EXPORTS):
         img[EAT + i * 4:EAT + i * 4 + 4] = body_off[name].to_bytes(4, "little")
         img[ENT + i * 4:ENT + i * 4 + 4] = name_off[name].to_bytes(4, "little")
         img[ORD + i * 2:ORD + i * 2 + 2] = (i).to_bytes(2, "little")
         img[name_off[name]:name_off[name] + len(name) + 1] = name.encode() + b"\x00"
-        stub = bytes([0xB8]) + imm.to_bytes(4, "little") + bytes([0x0F, 0x05, 0xC3])
-        img[body_off[name]:body_off[name] + 8] = stub
+        img[body_off[name]:body_off[name] + 8] = body
 
     with open(OUT, "wb") as f:
         f.write(bytes(img))
@@ -100,8 +100,8 @@ def main() -> None:
     print("sample.dll written: %d bytes" % len(img))
     print("  layout: ED=0x%03x EAT=0x%03x ENT=0x%03x ORD=0x%03x NAMES=0x%03x" % (ED, EAT, ENT, ORD, NAMES))
     print("  section VA=0x%03x size=0x%02x (RVA==offset identity)" % (base, vsize))
-    for name, imm in EXPORTS:
-        print("  %-10s name@0x%03x  body@0x%03x  imm=0x%08x" % (name, name_off[name], body_off[name], imm))
+    for name, body in EXPORTS:
+        print("  %-10s name@0x%03x  body@0x%03x  body=%s" % (name, name_off[name], body_off[name], body.hex()))
 
 
 if __name__ == "__main__":
