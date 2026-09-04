@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""mk_macho.py — emit the deployable macOS x86-64 artifact (Mach-O MH_EXECUTE).
+"""mk_macho.py — emit the macOS x86-64 artifact (Mach-O MH_EXECUTE).
 
 Wraps the assembled PIC payload (build/payload_macos.bin) in a minimal but
 structurally valid 64-bit Mach-O executable:

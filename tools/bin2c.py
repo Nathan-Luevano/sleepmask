@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """bin2c.py — emit a C header defining `payload` / `payload_len` from a blob.
 
-Used by the stage-0 build so the dropper (stage0/stage0.c) can embed the
-assembled PIC payload. Usage:  bin2c.py <in.bin> <out.h>
+Used by the stage-0 build so the stage-0 loader (src/stage0/stage0.c) can
+embed the assembled PIC payload. Usage:  bin2c.py <in.bin> <out.h>
 """
 import sys
 

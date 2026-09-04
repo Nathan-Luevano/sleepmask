@@ -22,9 +22,9 @@ The trampoline is exactly:
 
 so execution is: kernel -> beacon (saves every GPR, writes its token,
 restores everything, `ret`s) -> jmp -> original entry -> the host runs
-exactly as if nothing happened, having already paid for the malware. That is
-the classic appender deployment: the victim binary is "coupled" with the
-payload without a single host byte changing.
+exactly as if nothing happened, having already paid for the beacon. That is
+the appender's graft: the host binary is "coupled" with the payload
+without a single host byte changing.
 
 The beacon must be PIC (RIP-relative only) and must behave as a proper
 function: save/restore every general register and `ret`. See beacon_linux.asm.

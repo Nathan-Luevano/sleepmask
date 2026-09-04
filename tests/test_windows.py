@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""test_windows.py — the Windows deployable test.
+"""test_windows.py — the Windows artifact test.
 
 Regenerates build/sleepmask.exe via tools/mk_pe.py, then verifies it three
 ways:
@@ -41,7 +41,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(ROOT / "tools"))
-sys.path.insert(0, str(ROOT.parent.parent / "research" / "pe"))
+sys.path.insert(0, str(ROOT / "research" / "pe"))
 
 import run_harness as H          # noqa: E402  env constants + build_env()
 from pe_exports import pe_exports  # noqa: E402  independent PE reader

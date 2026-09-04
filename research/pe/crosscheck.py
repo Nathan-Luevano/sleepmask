@@ -15,7 +15,7 @@ from syscall_table import syscall_table
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 NTDLL = HERE / "ntdll.dll"
-HARNESS = ROOT / "malware" / "sleepmask-loader" / "test" / "run_harness.py"
+HARNESS = ROOT / "tests" / "run_harness.py"
 
 LABELS = ["NtDelayExecution", "NtProtectVirtualMemory", "KeQuerySystemTime"]
 PRESENT = ["NtProtectVirtualMemory"]

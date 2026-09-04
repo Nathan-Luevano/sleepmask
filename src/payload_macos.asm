@@ -1,6 +1,6 @@
 ; payload_macos.asm — x86-64 Mach (XNU) PIC payload (no imports, no libSystem).
 ;
-;   The malware body for macOS. Position-independent (RIP-relative `lea` only),
+;   The macOS payload body. Position-independent (RIP-relative `lea` only),
 ;   so the stage-0 stub can map it at any base. Behaviour: emit a beacon token
 ;   on fd 1, then exit(0).
 ;

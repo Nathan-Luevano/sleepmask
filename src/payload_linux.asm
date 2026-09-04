@@ -1,6 +1,6 @@
 ; payload_linux.asm — x86-64 SysV PIC payload (no imports, no libc).
 ;
-;   The malware body for Linux. Position-independent: the only memory
+;   The Linux payload body. Position-independent: the only memory
 ;   reference is a RIP-relative `lea`, so it runs correctly no matter what
 ;   base the stage-0 stub maps it at. Behaviour: emit a beacon token on fd 1,
 ;   then exit(0). All kernel entry is via direct `syscall` — nothing resolved

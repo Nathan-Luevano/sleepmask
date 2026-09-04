@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# test_all.sh — the full sleepmask deployable + host-coupling matrix, one command.
+# test_all.sh — the full test matrix (artifacts + host-coupling), one command.
 #
 #   1. build           assemble every PIC blob (nasm -f bin)
 #   2. linux           GROUND TRUTH: real static ELF, executed, stdout byte-checked
@@ -11,10 +11,10 @@
 #   7. macos-coupled   append_macho.py onto a host Mach-O; run in Unicorn (base + slide)
 #   8. harness         the raw windows blob in Unicorn (PEB walk, masked syscalls)
 #
-# Run from anywhere:  bash malware/sleepmask-loader/test_all.sh
+# Run from anywhere:  bash tests/test_all.sh
 # Exits 0 only if every layer passes.
 set -uo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 PY="micromamba run -n mdev python"
 pass=()
@@ -36,32 +36,32 @@ run_step() {
 # --- 1. build ----------------------------------------------------------------
 run_step "build (nasm -f bin)" bash build.sh
 
-# --- 2. linux deployable -----------------------------------------------------
-run_step "linux (real ELF, executed)" bash test/test_linux.sh
+# --- 2. linux artifact -------------------------------------------------------
+run_step "linux (real ELF, executed)"   bash tests/test_linux.sh
 
 # --- 3. linux host-coupling (ground truth, on metal) -------------------------
 run_step "linux-coupled (append_elf, PIE + no-pie, on metal)" \
-  bash test/test_append_linux.sh
+  bash tests/test_append_linux.sh
 
-# --- 4. windows deployable ---------------------------------------------------
+# --- 4. windows artifact -----------------------------------------------------
 run_step "windows (PE32+ + unicorn entry)" \
-  ${PY} test/test_windows.py
+  ${PY} tests/test_windows.py
 
 # --- 5. windows host-coupling ------------------------------------------------
 run_step "windows-coupled (append_pe + unicorn, real + decoy nr)" \
-  ${PY} test/test_append_windows.py
+  ${PY} tests/test_append_windows.py
 
-# --- 6. macos deployable -----------------------------------------------------
+# --- 6. macos artifact -------------------------------------------------------
 run_step "macos (Mach-O + unicorn xnu)" \
-  ${PY} test/test_macos.py
+  ${PY} tests/test_macos.py
 
 # --- 7. macos host-coupling --------------------------------------------------
 run_step "macos-coupled (append_macho + unicorn, base + slide)" \
-  ${PY} test/test_append_macos.py
+  ${PY} tests/test_append_macos.py
 
 # --- 8. raw blob harness -----------------------------------------------------
 run_step "harness (raw blob, PEB walk)" \
-  ${PY} test/run_harness.py
+  ${PY} tests/run_harness.py
 
 # --- summary ------------------------------------------------------------------
 echo

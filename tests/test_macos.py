@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""test_macos.py — the macOS deployable test.
+"""test_macos.py — the macOS artifact test.
 
 Regenerates build/sleepmask_macho via tools/mk_macho.py, then verifies it four
 ways:

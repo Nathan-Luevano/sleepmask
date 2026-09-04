@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""mk_pe.py — emit the deployable Windows x64 artifact (PE32+ .exe).
+"""mk_pe.py — emit the Windows x64 artifact (PE32+ .exe).
 
 Wraps the assembled PIC shellcode (build/sleepmask.bin) in a minimal but
 structurally valid PE32+ executable:

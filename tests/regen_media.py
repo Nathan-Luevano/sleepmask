@@ -2,7 +2,7 @@
 post from scratch and byte-diff against the committed file.
 
 Exit 0 = all captures byte-identical (the blog's bytes are reproducible).
-Run with:  micromamba run -n mdev python test/regen_media.py
+Run with:  micromamba run -n mdev python tests/regen_media.py
 
 Requires `bash build.sh` to have run (build/beacon_*.bin, build/host_*.bin).
 """
@@ -14,8 +14,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent          # malware/sleepmask-loader
-MEDIA = (ROOT.parent.parent / "blogs"
+ROOT = Path(__file__).resolve().parent.parent          # repo root
+MEDIA = (ROOT / "blogs"
          / "grafting-shellcode-onto-a-live-process" / "media")
 
 sys.path.insert(0, str(ROOT / "tools"))
@@ -165,11 +165,11 @@ def main():
 
         # ---------------- test stdout ---------------------------------------
         for name, cmd in (
-            ("test_linux.txt", ["bash", str(ROOT / "test" / "test_append_linux.sh")]),
+            ("test_linux.txt", ["bash", str(ROOT / "tests" / "test_append_linux.sh")]),
             ("test_windows.txt", ["micromamba", "run", "-n", "mdev", "python",
-                                  str(ROOT / "test" / "test_append_windows.py")]),
+                                  str(ROOT / "tests" / "test_append_windows.py")]),
             ("test_macos.txt", ["micromamba", "run", "-n", "mdev", "python",
-                                str(ROOT / "test" / "test_append_macos.py")]),
+                                str(ROOT / "tests" / "test_append_macos.py")]),
         ):
             r = subprocess.run(cmd, capture_output=True, cwd=ROOT)
             if r.returncode != 0:

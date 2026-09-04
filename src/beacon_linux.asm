@@ -7,7 +7,7 @@
 ;   _start runs would break the process), writes a beacon token on fd 1,
 ;   restores everything, and `ret`s so the host program continues as if
 ;   nothing happened. That is the whole stealth contract: the victim binary
-;   still does its job, with the malware's work already done.
+;   still does its job, with the beacon's work already done.
 ;
 ;   Position-independent: one RIP-relative `lea`, so it can be appended at
 ;   any address inside a host ELF (see tools/append_elf.py) and still work.

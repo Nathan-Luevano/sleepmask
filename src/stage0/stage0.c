@@ -1,7 +1,7 @@
 /*
- * stage0.c — stage-0 dropper (the "coupler").
+ * stage0.c — stage-0 loader (the "coupler").
  *
- *   The executable's real entry. It does NOT run the malware from its own
+ *   The executable's real entry. It does NOT run the payload from its own
  *   image: it allocates a fresh anonymous RWX page, copies the embedded,
  *   position-independent payload blob into it, and jumps to the copy. The
  *   payload therefore executes from self-chosen RWX memory, decoupled from
