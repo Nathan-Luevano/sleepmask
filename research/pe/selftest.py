@@ -1,6 +1,7 @@
 """Self-test for the PE export toolchain."""
 
 from emit_asm import render_equ
+from emit_thunk import thunk_bytes
 from pe_exports import pe_exports
 from pathlib import Path
 from syscall_table import find_stub_imm, syscall_table
@@ -42,6 +43,32 @@ def check_emit(data: bytes) -> list[tuple[str, bool]]:
     return [
         ("render_equ output", render_equ(rows) == expected),
         ("render_equ empty", render_equ([]) == ""),
+    ]
+
+
+def check_thunk(data: bytes) -> list[tuple[str, bool]]:
+    """Return (label, ok) pairs for emit_thunk checks."""
+    low_raises = False
+    try:
+        thunk_bytes(-1)
+    except ValueError:
+        low_raises = True
+
+    high_raises = False
+    try:
+        thunk_bytes(2**32)
+    except ValueError:
+        high_raises = True
+
+    return [
+        ("thunk_bytes 0x2b", thunk_bytes(0x2B) == b"\xb8\x2b\x00\x00\x00\x0f\x05\xc3"),
+        ("thunk_bytes 0x3d", thunk_bytes(0x3D) == b"\xb8\x3d\x00\x00\x00\x0f\x05\xc3"),
+        (
+            "thunk round-trip",
+            all(find_stub_imm(thunk_bytes(n)) == n for n in (0, 1, 0x2B, 0x3D, 0xFF, 0xFFFF)),
+        ),
+        ("thunk range low", low_raises),
+        ("thunk range high", high_raises),
     ]
 
 
