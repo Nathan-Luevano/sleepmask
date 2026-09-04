@@ -6,9 +6,9 @@ structurally valid PE32+ executable:
 
   - DOS stub (0x80 B), e_lfanew = 0x80
   - PE signature + COFF header (x86-64, 1 section, EXECUTABLE|LARGE_ADDRESS)
-  - PE32+ optional header: GUI subsystem, ImageBase 0x140000000, zero
-    data directories (no IAT, no imports — the blob resolves ntdll at
-    runtime from the PEB)
+  - PE32+ optional header: GUI subsystem by default (console with --console),
+    ImageBase 0x140000000, zero data directories (no IAT, no imports — the
+    blob resolves ntdll at runtime from the PEB)
   - one section: .text, RWX (the blob writes its own data slots), holding
     a 9-byte entry trampoline followed by the blob:
 
@@ -23,7 +23,12 @@ structurally valid PE32+ executable:
   NtDelayExecution and set done_flag) lands there, and the process sits
   resident — re-entering the mask whenever ntdll calls NtDelayExecution.
 
-usage: mk_pe.py [out.exe]   (default: build/sleepmask.exe)
+usage:
+  mk_pe.py [out.exe]              — wrap build/sleepmask.bin (default)
+  mk_pe.py in.bin out.exe         — wrap an arbitrary blob
+  add --console to either form to use the console subsystem (subsystem 3)
+  instead of the GUI subsystem (subsystem 2, the default); the console
+  variant is what the test probes use so their report lands in a window.
 """
 
 import struct
@@ -40,6 +45,7 @@ CHAR_EXECUTABLE   = 0x0002
 CHAR_LARGE_ADDR   = 0x0040
 OPT_MAGIC_PE32P   = 0x020B
 SUBSYSTEM_GUI     = 2
+SUBSYSTEM_CONSOLE = 3
 SECT_CODE         = 0x20
 SECT_MEM_EXECUTE  = 0x20000000
 SECT_MEM_READ     = 0x40000000
@@ -51,7 +57,6 @@ FILE_ALIGN     = 0x200
 HDR_SIZE       = 0x200                 # headers padded to FileAlignment
 TEXT_RVA       = 0x1000                # = ImageBase-relative offset of .text
 TEXT_RAW       = 0x200                 # file offset of .text raw data
-TEXT_RAW_SIZE  = 0x600                 # covers 9 + 1267 = 1276 bytes
 
 
 def dos_stub() -> bytes:
@@ -67,14 +72,15 @@ def dos_stub() -> bytes:
     return bytes(out)
 
 
-def make_pe(blob: bytes) -> bytes:
+def make_pe(blob: bytes, subsystem: int = SUBSYSTEM_GUI) -> bytes:
     vsize = len(TRAMPOLINE) + len(blob)
-    if vsize > TEXT_RAW_SIZE:
-        raise ValueError(f"blob too big: {vsize} > {TEXT_RAW_SIZE}")
+    text_raw_size = ((vsize + FILE_ALIGN - 1) // FILE_ALIGN) * FILE_ALIGN
+    if text_raw_size < FILE_ALIGN:
+        text_raw_size = FILE_ALIGN
     image_size = ((TEXT_RVA + vsize + SECT_ALIGN - 1) // SECT_ALIGN) * SECT_ALIGN
 
     # --- .text raw data: trampoline + blob + zero pad --------------------
-    text = bytearray(TEXT_RAW_SIZE)
+    text = bytearray(text_raw_size)
     text[0:len(TRAMPOLINE)] = TRAMPOLINE
     text[len(TRAMPOLINE):len(TRAMPOLINE) + len(blob)] = blob
 
@@ -95,7 +101,7 @@ def make_pe(blob: bytes) -> bytes:
     opt = bytearray(0xF0)
     struct.pack_into("<H", opt, 0x00, OPT_MAGIC_PE32P)
     struct.pack_into("<BB", opt, 0x02, 14, 0)         # linker version
-    struct.pack_into("<I", opt, 0x04, TEXT_RAW_SIZE)  # SizeOfCode
+    struct.pack_into("<I", opt, 0x04, text_raw_size)  # SizeOfCode
     struct.pack_into("<I", opt, 0x10, TEXT_RVA)       # AddressOfEntryPoint
     struct.pack_into("<I", opt, 0x14, TEXT_RVA)       # BaseOfCode
     struct.pack_into("<Q", opt, 0x18, IMAGE_BASE)
@@ -110,7 +116,7 @@ def make_pe(blob: bytes) -> bytes:
     struct.pack_into("<I", opt, 0x38, image_size)
     struct.pack_into("<I", opt, 0x3C, HDR_SIZE)
     struct.pack_into("<I", opt, 0x40, 0)              # CheckSum (loader fills)
-    struct.pack_into("<H", opt, 0x44, SUBSYSTEM_GUI)
+    struct.pack_into("<H", opt, 0x44, subsystem)
     struct.pack_into("<H", opt, 0x46, 0x6000)         # DllCharacteristics
     struct.pack_into("<Q", opt, 0x48, 0x100000)       # stack reserve
     struct.pack_into("<Q", opt, 0x50, 0x1000)         # stack commit
@@ -128,7 +134,7 @@ def make_pe(blob: bytes) -> bytes:
         b".text\0\0",
         vsize,                          # VirtualSize
         TEXT_RVA,                       # VirtualAddress
-        TEXT_RAW_SIZE,                  # SizeOfRawData
+        text_raw_size,                  # SizeOfRawData
         TEXT_RAW,                       # PointerToRawData
         0, 0,                           # no relocations / line numbers
         0, 0,
@@ -143,11 +149,26 @@ def make_pe(blob: bytes) -> bytes:
 
 
 def main() -> None:
-    blob = BLOB_PATH.read_bytes()
-    out = Path(sys.argv[1]) if len(sys.argv) > 1 else HERE / "build" / "sleepmask.exe"
-    data = make_pe(blob)
+    argv = sys.argv[1:]
+    console = False
+    if "--console" in argv:
+        console = True
+        argv = [a for a in argv if a != "--console"]
+    if len(argv) == 2:
+        blob_path = Path(argv[0])
+        out = Path(argv[1])
+    elif len(argv) == 1:
+        blob_path = BLOB_PATH
+        out = Path(argv[0])
+    else:
+        blob_path = BLOB_PATH
+        out = HERE / "build" / "sleepmask.exe"
+    subsystem = SUBSYSTEM_CONSOLE if console else SUBSYSTEM_GUI
+    blob = blob_path.read_bytes()
+    data = make_pe(blob, subsystem)
     out.write_bytes(data)
-    print(f"wrote {out} ({len(data)} bytes); blob {len(blob)} B at file +{TEXT_RAW + len(TRAMPOLINE):#x}, entry RVA {TEXT_RVA:#x}")
+    ss = "console" if console else "gui"
+    print(f"wrote {out} ({len(data)} bytes); blob {len(blob)} B; subsystem {ss}; blob at file +{TEXT_RAW + len(TRAMPOLINE):#x}, entry RVA {TEXT_RVA:#x}")
 
 
 if __name__ == "__main__":
