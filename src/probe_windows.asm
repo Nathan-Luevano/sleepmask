@@ -382,32 +382,34 @@ cmp_u16_ci:
     ret
 
 ; sysnr_from: rsi=fn -> rax=nr (64-bit, 0 if not found)
+;   forward-scans offsets 0..23 for the first nr mov:
+;     `B8 <nr:4>`        (mov eax,nr)   — legacy + modern ntdll thunks
+;     `48 C7 C0 <nr:4>`  (mov rax,nr)   — alternate encoder
+;   the modern x64 thunk is `4C 8B D1 B8 <nr:4> F6 ... 0F 05`, so the B8
+;   sits at offset 3 behind the `mov r10,rcx` preamble; first match wins.
+;   clobbers rax, r10, r11
 sysnr_from:
-    mov r10, 5
+    xor r10, r10
 .snr_scan:
-    cmp byte [rsi + r10], 0x0F
-    jne .snr_next
-    cmp byte [rsi + r10 + 1], 0x05
-    jne .snr_next
-    cmp byte [rsi + r10 - 5], 0xB8
-    jne .snr_chk_rax
-    mov eax, [rsi + r10 - 4]
-    ret
-.snr_chk_rax:
-    cmp byte [rsi + r10 - 7], 0x48
-    jne .snr_notfound
-    cmp byte [rsi + r10 - 6], 0xC7
-    jne .snr_notfound
-    cmp byte [rsi + r10 - 5], 0xC0
-    jne .snr_notfound
-    mov eax, [rsi + r10 - 4]
-    ret
-.snr_next:
+    cmp byte [rsi + r10], 0x48
+    je .snr_rax
+    cmp byte [rsi + r10], 0xB8
+    je .snr_eax
+.snr_adv:
     inc r10
-    cmp r10, 32
+    cmp r10, 24
     jb .snr_scan
-.snr_notfound:
     xor eax, eax
+    ret
+.snr_rax:
+    cmp byte [rsi + r10 + 1], 0xC7
+    jne .snr_adv
+    cmp byte [rsi + r10 + 2], 0xC0
+    jne .snr_adv
+    mov eax, [rsi + r10 + 3]
+    ret
+.snr_eax:
+    mov eax, [rsi + r10 + 1]
     ret
 
 ; find_export: rsi=name(ascii), rdx=len -> rax=fn abs addr (0 if not found)
