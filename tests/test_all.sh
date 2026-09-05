@@ -7,9 +7,17 @@
 #                      executed on metal (PIE + -no-pie), beacon-first + exit 42
 #   4. windows         PE32+ exe: static fields + independent parse + run from entry
 #   5. windows-coupled append_pe.py onto a host PE; run in Unicorn (real + decoy nr)
-#   6. macos           Mach-O: static fields + independent walk + run at base + slide
-#   7. macos-coupled   append_macho.py onto a host Mach-O; run in Unicorn (base + slide)
-#   8. harness         the raw windows blob in Unicorn (PEB walk, masked syscalls)
+#   6. windows-dll     PE32+ DLL (error-5 bypass): static fields + 2 load bases
+#                      x real + decoy nr; DllMain/DllRegisterServer/DllUnregisterServer
+#   7. windows-shell   raw shellcode at 4 arbitrary RWX addresses x real + decoy
+#                      nr: the SAC-proof run-shell.ps1 entry mode (no DLL image)
+#   8. windows-real    THE REAL PAYLOAD, same entry mode: sleepmask.bin `call`ed
+#                      at 4 arbitrary RWX addresses x real + decoy nr; mask over
+#                      NtDelayExecution observed in flight, 250 ms KeQuery poll,
+#                      byte-exact restore, done_flag=1
+#   9. macos           Mach-O: static fields + independent walk + run at base + slide
+#   10. macos-coupled  append_macho.py onto a host Mach-O; run in Unicorn (base + slide)
+#   11. harness        the raw windows blob in Unicorn (PEB walk, masked syscalls)
 #
 # Run from anywhere:  bash tests/test_all.sh
 # Exits 0 only if every layer passes.
@@ -51,15 +59,27 @@ run_step "windows (PE32+ + unicorn entry)" \
 run_step "windows-coupled (append_pe + unicorn, real + decoy nr)" \
   ${PY} tests/test_append_windows.py
 
-# --- 6. macos artifact -------------------------------------------------------
+# --- 6. windows DLL artifact (the error-5 bypass) ----------------------------
+run_step "windows-dll (PE32+ DLL + unicorn, 2 bases, real + decoy nr)" \
+  ${PY} tests/test_dll.py
+
+# --- 7. windows shellcode entry (the SAC-proof run-shell.ps1 mode) -----------
+run_step "windows-shellcode (beacon @ arbitrary RWX addr, real + decoy nr)" \
+  ${PY} tests/test_shellcode_entry.py
+
+# --- 8. windows REAL payload, same entry mode --------------------------------
+run_step "windows-real (sleepmask payload @ arbitrary RWX addr, real + decoy nr)" \
+  ${PY} tests/test_shellcode_sleepmask.py
+
+# --- 9. macos artifact -------------------------------------------------------
 run_step "macos (Mach-O + unicorn xnu)" \
   ${PY} tests/test_macos.py
 
-# --- 7. macos host-coupling --------------------------------------------------
+# --- 10. macos host-coupling -------------------------------------------------
 run_step "macos-coupled (append_macho + unicorn, base + slide)" \
   ${PY} tests/test_append_macos.py
 
-# --- 8. raw blob harness -----------------------------------------------------
+# --- 11. raw blob harness ----------------------------------------------------
 run_step "harness (raw blob, PEB walk)" \
   ${PY} tests/run_harness.py
 
