@@ -45,7 +45,7 @@ claim is reproducible with one command.
 
 | artifact | format | size | mechanism |
 |---|---|---|---|
-| `build/sleepmask.exe` | PE32+ x64, no imports | 2048 B | walks the PEB (`gs:[0x60]`) → `Ldr` → in-load-order list → `ntdll.dll`; parses the export directory; reads the syscall numbers for `NtDelayExecution`, `NtProtectVirtualMemory`, `KeQuerySystemTime` out of the export stub prologues (`B8 nn 00 00 00 0F 05`); marks the `NtDelayExecution` text RWX and overwrites it with a 12-byte mask that polls `KeQuerySystemTime` and restores the original bytes on return; re-protects, sets its done flag, and returns into the 9-byte entry trampoline (which idles in a `pause` loop with the mask live in-process) |
+| `build/sleepmask.exe` | PE32+ x64, no imports | 2048 B | walks the PEB (`gs:[0x60]`) → `Ldr` → in-load-order list → `ntdll.dll`; parses the export directory; reads the syscall numbers for `NtDelayExecution` and `NtProtectVirtualMemory` out of the modern export stub prologues (forward-scan for the nr `mov` in the `4C 8B D1 B8 nn 00 00 00 …` layout); marks the `NtDelayExecution` text RWX and overwrites it with a 12-byte mask that polls the `KUSER_SHARED_DATA` clock (`[0x7FFE0014]`) and restores the original bytes on return; re-protects, sets its done flag, and returns into the 9-byte entry trampoline (which idles in a `pause` loop with the mask live in-process) |
 | `build/sleepmask_linux` | static ELF x86-64 (`gcc -static`) | ~785 KB (CRT + 81 B payload) | stage-0 loader: `mmap` a fresh RWX page, `memcpy` the 81-byte PIC payload in, jump to it. The payload emits `sleepmask: armed \| linux x86-64 \| self-injected` on fd 1 and `exit(0)`. **Executed for real; stdout byte-checked.** |
 | `build/sleepmask_macho` | Mach-O `MH_EXECUTE` x86_64 | 4177 B | same 81-byte PIC payload with XNU class-tagged syscalls (`eax = 0x2000000 \| nr`; `write` = 0, `exit` = 1), in a two-load-command executable (`LC_SEGMENT_64` `__TEXT` + `LC_MAIN`) |
 
@@ -92,10 +92,11 @@ is what makes the blob immune to a kernel that renumbers its syscalls.
 
 **Sleep masking.** With `NtDelayExecution`'s own bytes under the process's
 control, "sleeping" becomes observable: the mask swaps the entry for
-`mov rax, <stub>; jmp rax`, the stub polls `KeQuerySystemTime` for the
-requested duration, restores the original twelve bytes, and returns. The
-harness asserts the restored bytes are byte-identical to the captured
-original (`b8 3d 00 00 00 0f 05 c3 00 00 00 00`).
+`mov rax, <stub>; jmp rax`, the stub polls `KUSER_SHARED_DATA->SystemTime`
+(`[0x7FFE0014]`, no exports, no calls) for the requested duration, restores
+the original twelve bytes, and returns. The harness asserts the restored
+bytes are byte-identical to the captured original (`4c 8b d1 b8 3d 00 00 00
+f6 04 25 08` — the modern thunk's first 12 bytes).
 
 **Host coupling (the appenders).** Each appender adds one new RWX section at
 a fresh page `V` containing exactly:
@@ -161,10 +162,10 @@ Layer notes:
 - **windows / windows-coupled** — `tools/mk_pe.py` writes the PE32+; the test
   validates header fields, re-parses with the independent stdlib-only reader
   in `research/pe/`, then runs the *whole image* in Unicorn from the real
-  entry point. Asserts the syscall trace (`0x2B 0x2B` — two
-  `NtProtectVirtualMemory` calls), the done flag, the 26 `KeQuerySystemTime`
-   polls, and byte-identical restore of `NtDelayExecution`.
-- **windows-dll** — `tools/mk_dll.py` wraps the 1497-byte PIC beacon in a
+   entry point. Asserts the syscall trace (`0x2B 0x2B` — two
+   `NtProtectVirtualMemory` calls), the done flag, the 26 `KUSER_SHARED_DATA`
+   clock reads, and byte-identical restore of `NtDelayExecution`.
+- **windows-dll** — `tools/mk_dll.py` wraps the 1507-byte PIC beacon in a
   PE32+ DLL (one RWX `.text`, no imports, no relocations → correct at any load
   base). The test validates the bytes, then loads the image at two bases in
   Unicorn and enters it the way `rundll32`/`regsvr32` would: `DllMain` →
@@ -179,11 +180,12 @@ Layer notes:
   full dual trace, a clean return to the return slot, and the R15 sentinel,
   under real and decoy nr.
 - **windows-real** — the same SAC-proof entry mode, but the blob is the
-  **real 1267-byte sleepmask payload** (not the beacon): `call`-entered at four
+  **real 1212-byte sleepmask payload** (not the beacon): `call`-entered at four
   arbitrary RWX addresses, it walks the live PEB, reads the real syscall
   numbers out of the export prologues, `NtProtectVirtualMemory(RWX)` → masks
-  `NtDelayExecution` in place → polls `KeQuerySystemTime` for ~250 ms →
-  restores the original bytes byte-exact → `NtProtectVirtualMemory(restore)` →
+  `NtDelayExecution` in place → polls the `KUSER_SHARED_DATA` clock for
+  ~250 ms → restores the original bytes byte-exact →
+  `NtProtectVirtualMemory(restore)` →
   sets the done flag → `ret`. Asserts the syscall trace (`0x2B 0x2B`), the
   done flag, the 26 clock polls past the 2 500 000-unit window, and the
   12-byte restore, under real and decoy nr. This is the exact code path
@@ -191,9 +193,12 @@ Layer notes:
 - **macos** — `tools/mk_macho.py` writes the Mach-O; the test walks the load
   commands with an independent generic walker, then runs in Unicorn at the
   nominal base and again slid `+0x1000` (the PIC check).
-- **harness** — the raw 1267-byte Windows blob against a hand-built fake
+- **harness** — the raw 1212-byte Windows blob against a hand-built fake
   PEB/ntdll: PEB walk → export parse → syscall-number extraction →
-  `NtProtectVirtualMemory(RWX)` → mask install → byte restore.
+  `NtProtectVirtualMemory(RWX)` → mask install → byte restore. The fake
+  clock is the honest version: a MEM_READ hook on the `KUSER_SHARED_DATA`
+  SystemTime qword advances it 10 ms per read, so the stub's poll loop is
+  what drives time forward.
 
 `research/pe/` is exercised separately: `selftest.py` (18 checks, regenerates
 its fixture) and `crosscheck.py` (the offline syscall table against the

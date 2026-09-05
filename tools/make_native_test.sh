@@ -187,7 +187,7 @@ public static class SleepmaskShell {
     $t0 = Get-Date
     [SleepmaskShell]::Call($smem)
     $ms = [int]((Get-Date) - $t0).TotalMilliseconds
-    $done = [SleepmaskShell]::ReadQ($smem, $s.Length - 84)
+    $done = [SleepmaskShell]::ReadQ($smem, $s.Length - 66)
     Write-Host "  [powershell] sleepmask payload ($($s.Length) B) returned in $ms ms"
     if ($done -eq 1) {
       Write-Host "  [powershell] sleepmask done_flag = 1  -> masked NtDelayExecution, slept, restored the original bytes"
