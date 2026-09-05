@@ -11,20 +11,23 @@ tools/append_pe.py, and verifies the result two ways:
      reader (research/pe/pe_exports.py) still accepts the image with zero
      imports (the beacon resolves ntdll from the PEB at runtime, no IAT).
 
-  2. DYNAMIC: load the coupled image into Unicorn at its ImageBase and enter
-     it the way the Windows loader would (RSP primed, jmp entry). The `.bcon`
-     stub calls the beacon, which fires its NtWriteFile on the stdout handle
-     BEFORE the host runs, then returns into the host; the host writes its own
-     line and dies in NtTerminateProcess(GetCurrentProcess, 42). The run is
-     done twice — once with the real syscall numbers and once with decoy
-     numbers baked into the fake ntdll — to prove the nr is read from the
-     export prologue, not hard-coded.
+   2. DYNAMIC: load the coupled image into Unicorn at its ImageBase and enter
+      it the way the Windows loader would (RSP primed, jmp entry). The `.bcon`
+      stub calls the beacon, which fires its trace BEFORE the host runs: an
+      NtWriteFile on the stdout handle AND an NtCreateFile/NtWriteFile/NtClose
+      that leaves `sleepmask_beacon.txt` in the CWD (the "runs no matter what"
+      artifact — it survives even if the console is swallowed). Then the
+      stub returns into the host; the host writes its own line and dies in
+      NtTerminateProcess(GetCurrentProcess, 42). The run is done twice — once
+      with the real syscall numbers and once with decoy numbers baked into the
+      fake ntdll — to prove the nr is read from the export prologue, not
+      hard-coded.
 
-PASS = in BOTH nr configurations: the beacon token is the first write (on the
-stdout handle), the host's own line follows it, the host's exit code is
-preserved (42), and the sentinel parked in R15 survives (the beacon saved
-every callee-saved reg the host could observe). Exit 0 pass / 1 fail / 2
-build problem.
+PASS = in BOTH nr configurations: the beacon's stdout token is first, its
+file-artifact write (to the fake handle) is second, the host's own line is
+third, the host's exit code is preserved (42), and the sentinel parked in
+R15 survives (the beacon saved every callee-saved reg the host could
+observe). Exit 0 pass / 1 fail / 2 build problem.
 """
 
 import struct
@@ -48,6 +51,7 @@ from unicorn.x86_const import (
     UC_X86_REG_RSP,
     UC_X86_REG_RCX,
     UC_X86_REG_RDX,
+    UC_X86_REG_R8,
     UC_X86_REG_R15,
     UC_X86_REG_GS_BASE,
 )
@@ -69,12 +73,20 @@ NTDLL_BASE = 0x100000
 STACK      = 0x600000
 RSP0       = 0x610000
 STDOUT_HDL = 0x12345678
+FILE_HDL   = 0x55550000     # fake handle the create-hook writes to [rcx]
 
 BEACON_MSG = b"sleepmask: coupled | windows x86-64 | host continues\n"
 HOST_MSG   = b"host alive\n"
 
-NR_WRITE_REAL, NR_TERM_REAL = 0x17, 0x0B    # Win10 x64
-NR_WRITE_DECOY, NR_TERM_DECOY = 0x5C, 0x99  # decoys (still distinct)
+# The exact on-disk artifact the beacon must leave (the "runs no matter what"
+# receipt). The create-hook decodes this from the live ObjectAttributes, so a
+# typo in the beacon's path string is a failure.
+ARTIFACT_NAME = "sleepmask_beacon.txt"
+
+# fixture syscall numbers (all distinct; the beacon reads them at runtime):
+#   NtWriteFile / NtCreateFile / NtClose / NtTerminateProcess
+NR_WRITE_REAL, NR_CREATE_REAL, NR_CLOSE_REAL, NR_TERM_REAL = 0x17, 0x55, 0x15, 0x0B
+NR_WRITE_DECOY, NR_CREATE_DECOY, NR_CLOSE_DECOY, NR_TERM_DECOY = 0x5C, 0x63, 0x77, 0x99
 
 # Parked in R15 before entry: the beacon saves/restores all 15 GPRs and the
 # host never touches R15, so it must survive the whole coupled run. (RBX is
@@ -179,7 +191,7 @@ def static_check(coupled: bytes, host: bytes, beacon: bytes) -> list:
     return p
 
 
-def build_env(uc, nr_write, nr_term):
+def build_env(uc, nr_write, nr_create, nr_close, nr_term):
     w = uc.mem_write
     q = "<Q"
     # PEB / Ldr chain
@@ -187,36 +199,46 @@ def build_env(uc, nr_write, nr_term):
     w(PEB_ADDR + 0x18, struct.pack(q, LDR_ADDR))     # PEB->Ldr
     w(PEB_ADDR + 0x20, struct.pack(q, PARAMS))       # PEB->Params
     w(PARAMS + 0x28, struct.pack(q, STDOUT_HDL))     # StandardOutput
-    w(LDR_ADDR + 0x08, struct.pack(q, LDR_ENTRY))    # InLoadOrder head
-    w(LDR_ENTRY + 0x00, struct.pack(q, LDR_ADDR + 0x08))  # Flink (circular)
-    w(LDR_ENTRY + 0x50, struct.pack("<H", 18))       # BaseDllName.Length
-    w(LDR_ENTRY + 0x58, struct.pack(q, NAME_ADDR))   # BaseDllName.Buffer
-    w(LDR_ENTRY + 0x60, struct.pack(q, NTDLL_BASE))  # DllBase
+    w(LDR_ADDR + 0x10, struct.pack(q, LDR_ENTRY))    # InLoadOrder head
+    w(LDR_ENTRY + 0x00, struct.pack(q, LDR_ADDR + 0x10))  # Flink (circular)
+    w(LDR_ENTRY + 0x30, struct.pack(q, NTDLL_BASE))  # DllBase
+    w(LDR_ENTRY + 0x58, struct.pack("<H", 18))       # BaseDllName.Length
+    w(LDR_ENTRY + 0x60, struct.pack(q, NAME_ADDR))   # BaseDllName.Buffer
     w(NAME_ADDR, "ntdll.dll".encode("utf-16-le"))
 
-    # fake ntdll PE
+    # fake ntdll PE (4 exports: the beacon resolves all four by name)
     w(NTDLL_BASE + 0x3C, struct.pack("<I", 0x100))   # e_lfanew
     w(NTDLL_BASE + 0x100, b"PE\0\0")
     opt = NTDLL_BASE + 0x100 + 0x18
     w(opt, struct.pack("<H", 0x20B))
     w(opt + 0x70, struct.pack("<I", 0x200))          # ExportDir.RVA
     edir = NTDLL_BASE + 0x200
-    w(edir + 0x0C, struct.pack("<I", 2))             # NumberOfFunctions
-    w(edir + 0x10, struct.pack("<I", 2))             # NumberOfNames
-    w(edir + 0x14, struct.pack("<I", 0x300))         # EAT
-    w(edir + 0x18, struct.pack("<I", 0x380))         # ENT
-    w(edir + 0x1C, struct.pack("<I", 0x400))         # ORD
+    w(edir + 0x14, struct.pack("<I", 4))             # NumberOfFunctions
+    w(edir + 0x18, struct.pack("<I", 4))             # NumberOfNames
+    w(edir + 0x1C, struct.pack("<I", 0x300))         # EAT
+    w(edir + 0x20, struct.pack("<I", 0x380))         # ENT
+    w(edir + 0x24, struct.pack("<I", 0x400))         # ORD
     w(NTDLL_BASE + 0x300 + 4 * 0, struct.pack("<I", 0x1000))  # EAT[0]
     w(NTDLL_BASE + 0x300 + 4 * 1, struct.pack("<I", 0x1100))  # EAT[1]
+    w(NTDLL_BASE + 0x300 + 4 * 2, struct.pack("<I", 0x1200))  # EAT[2]
+    w(NTDLL_BASE + 0x300 + 4 * 3, struct.pack("<I", 0x1300))  # EAT[3]
     w(NTDLL_BASE + 0x380 + 4 * 0, struct.pack("<I", 0x500))   # ENT[0]
     w(NTDLL_BASE + 0x380 + 4 * 1, struct.pack("<I", 0x580))   # ENT[1]
+    w(NTDLL_BASE + 0x380 + 4 * 2, struct.pack("<I", 0x600))   # ENT[2]
+    w(NTDLL_BASE + 0x380 + 4 * 3, struct.pack("<I", 0x680))   # ENT[3]
     w(NTDLL_BASE + 0x400 + 2 * 0, struct.pack("<H", 0))       # ORD[0]
     w(NTDLL_BASE + 0x400 + 2 * 1, struct.pack("<H", 1))       # ORD[1]
+    w(NTDLL_BASE + 0x400 + 2 * 2, struct.pack("<H", 2))       # ORD[2]
+    w(NTDLL_BASE + 0x400 + 2 * 3, struct.pack("<H", 3))       # ORD[3]
     w(NTDLL_BASE + 0x500, b"NtWriteFile\0")
-    w(NTDLL_BASE + 0x580, b"NtTerminateProcess\0")
+    w(NTDLL_BASE + 0x580, b"NtCreateFile\0")
+    w(NTDLL_BASE + 0x600, b"NtClose\0")
+    w(NTDLL_BASE + 0x680, b"NtTerminateProcess\0")
     # thunks: B8 <nr> 00 00 00 0F 05 C3 (nr is read, not hard-coded)
     w(NTDLL_BASE + 0x1000, bytes((0xB8, nr_write, 0, 0, 0, 0x0F, 0x05, 0xC3)))
-    w(NTDLL_BASE + 0x1100, bytes((0xB8, nr_term, 0, 0, 0, 0x0F, 0x05, 0xC3)))
+    w(NTDLL_BASE + 0x1100, bytes((0xB8, nr_create, 0, 0, 0, 0x0F, 0x05, 0xC3)))
+    w(NTDLL_BASE + 0x1200, bytes((0xB8, nr_close, 0, 0, 0, 0x0F, 0x05, 0xC3)))
+    w(NTDLL_BASE + 0x1300, bytes((0xB8, nr_term, 0, 0, 0, 0x0F, 0x05, 0xC3)))
 
 
 def load_image(uc, data):
@@ -230,10 +252,30 @@ def load_image(uc, data):
     return u32(data, opt + 0x10)
 
 
-def run_coupled(uc, nr_write, nr_term):
-    """Enter the loaded image at its entry; return (writes, exit_code, r15)."""
+def read_file_name(uc_, oa_ptr):
+    """NtCreateFile's ObjectAttributes (r8) -> UNICODE_STRING -> UTF-16 name.
+
+    OBJECT_ATTRIBUTES: +0x10 = ObjectName (ptr to UNICODE_STRING).
+    UNICODE_STRING: +0x00 = Length (bytes), +0x08 = Buffer (ptr, UTF-16LE).
+    Returns the decoded name, or None if any pointer is null.
+    """
+    if not oa_ptr:
+        return None
+    us_ptr = struct.unpack("<Q", bytes(uc_.mem_read(oa_ptr + 0x10, 8)))[0]
+    if not us_ptr:
+        return None
+    us_len = struct.unpack("<H", bytes(uc_.mem_read(us_ptr, 2)))[0]
+    us_buf = struct.unpack("<Q", bytes(uc_.mem_read(us_ptr + 8, 8)))[0]
+    if not us_buf or not us_len:
+        return None
+    return bytes(uc_.mem_read(us_buf, us_len)).decode("utf-16-le", "replace")
+
+
+def run_coupled(uc, nr_write, nr_create, nr_close, nr_term):
+    """Enter the loaded image at its entry; return (writes, exit_code, r15, created)."""
     writes = []
     exit_code = [None]
+    created = []
 
     def on_code(uc_, rip, size, _):
         if bytes(uc_.mem_read(rip, 2)) != b"\x0F\x05":
@@ -246,6 +288,17 @@ def run_coupled(uc, nr_write, nr_term):
             buf = struct.unpack("<Q", bytes(uc_.mem_read(rsp + 0x28, 8)))[0]
             ln = struct.unpack("<I", bytes(uc_.mem_read(rsp + 0x30, 4)))[0]
             writes.append((rcx, bytes(uc_.mem_read(buf, ln))))
+            uc_.reg_write(UC_X86_REG_RAX, 0)
+            uc_.reg_write(UC_X86_REG_RIP, rip + 2)
+        elif nr == nr_create:
+            # NtCreateFile(fh_out=&fh_out, ...): stash a fake handle at [rcx],
+            # and decode the target path from r8's ObjectAttributes.
+            oa = uc_.reg_read(UC_X86_REG_R8)
+            created.append(read_file_name(uc_, oa))
+            uc_.mem_write(rcx, struct.pack("<Q", FILE_HDL))
+            uc_.reg_write(UC_X86_REG_RAX, 0)
+            uc_.reg_write(UC_X86_REG_RIP, rip + 2)
+        elif nr == nr_close:
             uc_.reg_write(UC_X86_REG_RAX, 0)
             uc_.reg_write(UC_X86_REG_RIP, rip + 2)
         elif nr == nr_term:
@@ -268,20 +321,27 @@ def run_coupled(uc, nr_write, nr_term):
     # stop emulation after zero instructions.)
     start = IMAGE_BASE + entry
     uc.emu_start(start, start + 1, count=5_000_000)
-    return writes, exit_code[0], uc.reg_read(UC_X86_REG_R15)
+    return writes, exit_code[0], uc.reg_read(UC_X86_REG_R15), created
 
 
-def dynamic_check(writes, exit_code, r15, label):
+def dynamic_check(writes, exit_code, r15, created, label):
     p = []
-    if len(writes) != 2:
-        p.append(f"[{label}] expected 2 writes (beacon, host), got {len(writes)}")
+    # The beacon's NtCreateFile must target the exact artifact name.
+    if created != [ARTIFACT_NAME]:
+        p.append(f"[{label}] artifact filename wrong: {created!r} != [{ARTIFACT_NAME!r}]")
+    # beacon fires twice (stdout + the file artifact), then the host writes.
+    if len(writes) != 3:
+        p.append(f"[{label}] expected 3 writes (beacon->stdout, beacon->file, host), got {len(writes)}")
     else:
         h0, m0 = writes[0]
         h1, m1 = writes[1]
+        h2, m2 = writes[2]
         if not (m0 == BEACON_MSG and h0 == STDOUT_HDL):
-            p.append(f"[{label}] beacon write wrong: handle=0x{h0:x} msg={m0!r}")
-        if not (m1 == HOST_MSG and h1 == STDOUT_HDL):
-            p.append(f"[{label}] host write wrong: handle=0x{h1:x} msg={m1!r}")
+            p.append(f"[{label}] beacon stdout write wrong: handle=0x{h0:x} msg={m0!r}")
+        if not (m1 == BEACON_MSG and h1 == FILE_HDL):
+            p.append(f"[{label}] beacon file write wrong: handle=0x{h1:x} msg={m1!r}")
+        if not (m2 == HOST_MSG and h2 == STDOUT_HDL):
+            p.append(f"[{label}] host write wrong: handle=0x{h2:x} msg={m2!r}")
     if exit_code != 42:
         p.append(f"[{label}] host exit code {exit_code} != 42")
     if r15 != SENTINEL_R15:
@@ -324,25 +384,28 @@ def main() -> int:
 
     # --- 2. dynamic: real nr, then decoy nr ------------------------------
     all_problems = []
-    for label, nw, nt in (("real", NR_WRITE_REAL, NR_TERM_REAL),
-                          ("decoy", NR_WRITE_DECOY, NR_TERM_DECOY)):
+    for label, nw, nc, ncl, nt in (
+            ("real", NR_WRITE_REAL, NR_CREATE_REAL, NR_CLOSE_REAL, NR_TERM_REAL),
+            ("decoy", NR_WRITE_DECOY, NR_CREATE_DECOY, NR_CLOSE_DECOY, NR_TERM_DECOY)):
         uc = Uc(UC_ARCH_X86, UC_MODE_64)
         uc.mem_map(0x0, 0x100000)
         uc.mem_map(NTDLL_BASE, 0x100000)
         uc.mem_map(STACK, 0x20000)
         uc.mem_map(IMAGE_BASE, 0x10000)
-        build_env(uc, nw, nt)
-        writes, exit_code, r15 = run_coupled(uc, nw, nt)
+        build_env(uc, nw, nc, ncl, nt)
+        writes, exit_code, r15, created = run_coupled(uc, nw, nc, ncl, nt)
         print(f"[{label}] writes={[w[1].decode(errors='replace') for w in writes]}"
-              f" exit={exit_code} r15={'ok' if r15 == SENTINEL_R15 else 'X'}")
-        all_problems += dynamic_check(writes, exit_code, r15, label)
+              f" created={created!r} exit={exit_code} "
+              f"r15={'ok' if r15 == SENTINEL_R15 else 'X'}")
+        all_problems += dynamic_check(writes, exit_code, r15, created, label)
 
     for pr in all_problems:
         print(f"RUN FAIL: {pr}")
     if all_problems:
         print("FAIL")
         return 1
-    print("PASS (windows host coupling: beacon fired first, host ran, exit 42 + r15 preserved; real + decoy nr)")
+    print("PASS (windows host coupling: beacon fired first -> stdout AND "
+          f"{ARTIFACT_NAME}; host ran, exit 42 + r15 preserved; real + decoy nr)")
     return 0
 
 

