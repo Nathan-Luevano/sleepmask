@@ -85,11 +85,11 @@ def build_env(uc):
     w(opt + 0x70, struct.pack("<I", 0x200))               # DataDirectory[0].RVA
 
     edir = NTDLL_BASE + 0x200
-    w(edir + 0x10, struct.pack("<I", len(NAMES)))         # NumberOfFunctions
-    w(edir + 0x14, struct.pack("<I", len(NAMES)))         # NumberOfNames
-    w(edir + 0x18, struct.pack("<I", 0x1000))             # EAT
-    w(edir + 0x1C, struct.pack("<I", 0x1800))             # ENT
-    w(edir + 0x20, struct.pack("<I", 0x2000))             # ORD
+    w(edir + 0x14, struct.pack("<I", len(NAMES)))         # NumberOfFunctions
+    w(edir + 0x18, struct.pack("<I", len(NAMES)))         # NumberOfNames
+    w(edir + 0x1C, struct.pack("<I", 0x1000))             # EAT
+    w(edir + 0x20, struct.pack("<I", 0x1800))             # ENT
+    w(edir + 0x24, struct.pack("<I", 0x2000))             # ORD
 
     for i, (name, nr) in enumerate(NAMES):
         w(NTDLL_BASE + 0x1000 + i * 4, struct.pack("<I", 0x5000 + i * 0x100))

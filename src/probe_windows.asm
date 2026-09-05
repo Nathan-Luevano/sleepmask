@@ -6,7 +6,7 @@
 ;     2. Walk LDR_DATA_TABLE_ENTRY list for "ntdll.dll"
 ;        (DllBase +0x30, BaseDllName.Length +0x58, .Buffer +0x60)
 ;     3. Parse ntdll's PE export directory
-;        (NumberOfNames +0x14, EAT +0x18, ENT +0x1C, ORD +0x20)
+;        (NumberOfNames +0x18, EAT +0x1C, ENT +0x20, ORD +0x24)
 ;     4. Read syscall numbers from export prologues:
 ;        NtTerminateCurrentProcessEx, NtWriteFile, NtCreateFile, NtClose
 ;     5. Create sleepmask_probe.txt in the CWD (best effort)
@@ -80,18 +80,18 @@ sym_base:
     add r11, [r12 + (ntdll_base - sym_base)]
 
     ; IMAGE_DIRECTORY_ENTRY_EXPORT:
-    ;   +0x14 NumberOfNames, +0x18 EAT, +0x1C ENT, +0x20 ORD
-    mov r10d, [r11 + 0x14]
+    ;   +0x18 NumberOfNames, +0x1C EAT, +0x20 ENT, +0x24 ORD
+    mov r10d, [r11 + 0x18]
     mov [r12 + (num_names - sym_base)], r10
-    mov r9d, [r11 + 0x18]
-    mov r10, [r12 + (ntdll_base - sym_base)]
-    add r10, r9
-    mov [r12 + (eat_base - sym_base)], r10
     mov r9d, [r11 + 0x1C]
     mov r10, [r12 + (ntdll_base - sym_base)]
     add r10, r9
-    mov [r12 + (ent_base - sym_base)], r10
+    mov [r12 + (eat_base - sym_base)], r10
     mov r9d, [r11 + 0x20]
+    mov r10, [r12 + (ntdll_base - sym_base)]
+    add r10, r9
+    mov [r12 + (ent_base - sym_base)], r10
+    mov r9d, [r11 + 0x24]
     mov r10, [r12 + (ntdll_base - sym_base)]
     add r10, r9
     mov [r12 + (ord_base - sym_base)], r10

@@ -45,18 +45,18 @@ sym_base:
     mov [r12 + (ntdll_base - sym_base)], rax
     mov rax, [gs:0x60]
     mov rax, [rax + 0x18]
-    lea r14, [rax + 0x08]
+    lea r14, [rax + 0x10]
     mov r13, [r14]
 .peb_walk:
-    mov rsi, [r13 + 0x58]
-    mov rdx, [r13 + 0x50]
+    mov rsi, [r13 + 0x60]
+    mov rdx, [r13 + 0x58]
     shr rdx, 1
     lea r8, [r12 + (s_ntdll_u16 - sym_base)]
     mov r9, 9
     call cmp_u16_ci
     test rax, rax
     jz .peb_next
-    mov rax, [r13 + 0x60]
+    mov rax, [r13 + 0x30]
     mov [r12 + (ntdll_base - sym_base)], rax
     jmp .peb_next
 .peb_next:
@@ -80,17 +80,17 @@ sym_base:
     mov r11d, [r10 + 0x70]
     add r11, [r12 + (ntdll_base - sym_base)]
     mov [r12 + (exp_dir - sym_base)], r11
-    mov r10d, [r11 + 0x10]
+    mov r10d, [r11 + 0x18]
     mov [r12 + (num_names - sym_base)], r10
-    mov r9d, [r11 + 0x14]
+    mov r9d, [r11 + 0x1C]
     mov r10, [r12 + (ntdll_base - sym_base)]
     add r10, r9
     mov [r12 + (eat_base - sym_base)], r10
-    mov r9d, [r11 + 0x18]
+    mov r9d, [r11 + 0x20]
     mov r10, [r12 + (ntdll_base - sym_base)]
     add r10, r9
     mov [r12 + (ent_base - sym_base)], r10
-    mov r9d, [r11 + 0x1C]
+    mov r9d, [r11 + 0x24]
     mov r10, [r12 + (ntdll_base - sym_base)]
     add r10, r9
     mov [r12 + (ord_base - sym_base)], r10

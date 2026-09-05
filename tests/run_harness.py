@@ -4,7 +4,7 @@
 Builds a fake x64 Windows environment and runs the assembled shellcode
 until it returns:
 
-  [gs:0x60] -> PEB(+0x18 = Ldr) -> Ldr(+0x08 = head) -> LDR entry
+  [gs:0x60] -> PEB(+0x18 = Ldr) -> Ldr(+0x10 = head) -> LDR entry
   LDR entry: BaseDllName = "ntdll.dll" (UTF-16), DllBase = fake ntdll PE
   The PE exports NtDelayExecution / NtProtectVirtualMemory as
   `mov eax, NR; syscall; ret` thunks (so the shellcode can read the syscall
@@ -67,11 +67,11 @@ def build_env(uc):
     # --- PEB / LDR chain ----------------------------------------------
     w(0x60, _q(PEB_ADDR))
     w(PEB_ADDR + 0x18, _q(LDR_ADDR))          # PEB->Ldr
-    w(LDR_ADDR + 0x08, _q(LDR_ENTRY))         # InLoadOrderModuleList head
-    w(LDR_ENTRY + 0x00, _q(LDR_ADDR + 0x08))  # Flink: entry -> head (circular)
-    w(LDR_ENTRY + 0x50, struct.pack("<H", 18))  # BaseDllName.Length (bytes)
-    w(LDR_ENTRY + 0x58, _q(NAME_ADDR))        # BaseDllName.Buffer
-    w(LDR_ENTRY + 0x60, _q(NTDLL_BASE))       # DllBase
+    w(LDR_ADDR + 0x10, _q(LDR_ENTRY))         # InLoadOrderModuleList head
+    w(LDR_ENTRY + 0x00, _q(LDR_ADDR + 0x10))  # Flink: entry -> head (circular)
+    w(LDR_ENTRY + 0x30, _q(NTDLL_BASE))       # DllBase
+    w(LDR_ENTRY + 0x58, struct.pack("<H", 18))  # BaseDllName.Length (bytes)
+    w(LDR_ENTRY + 0x60, _q(NAME_ADDR))        # BaseDllName.Buffer
     w(NAME_ADDR, "ntdll.dll".encode("utf-16-le"))
 
     # --- fake ntdll PE --------------------------------------------------
@@ -81,11 +81,11 @@ def build_env(uc):
     w(opt, struct.pack("<H", 0x20B))                   # PE32+ magic
     w(opt + 0x70, struct.pack("<I", 0x200))            # ExportDir.RVA
     edir = NTDLL_BASE + 0x200
-    w(edir + 0x0C, struct.pack("<I", len(EXPORTS)))    # NumberOfFunctions
-    w(edir + 0x10, struct.pack("<I", len(EXPORTS)))    # NumberOfNames
-    w(edir + 0x14, struct.pack("<I", 0x300))           # EAT RVA
-    w(edir + 0x18, struct.pack("<I", 0x380))           # ENT RVA
-    w(edir + 0x1C, struct.pack("<I", 0x400))           # ORD RVA
+    w(edir + 0x14, struct.pack("<I", len(EXPORTS)))    # NumberOfFunctions
+    w(edir + 0x18, struct.pack("<I", len(EXPORTS)))    # NumberOfNames
+    w(edir + 0x1C, struct.pack("<I", 0x300))           # EAT RVA
+    w(edir + 0x20, struct.pack("<I", 0x380))           # ENT RVA
+    w(edir + 0x24, struct.pack("<I", 0x400))           # ORD RVA
     for i, (name, rva) in enumerate(EXPORTS):
         w(NTDLL_BASE + 0x300 + 4 * i, struct.pack("<I", rva))
         w(NTDLL_BASE + 0x380 + 4 * i, struct.pack("<I", 0x500 + 0x80 * i))
