@@ -3,11 +3,11 @@
 
 build/sleepmask.bin is the flagship blob (PEB walk -> ntdll exports ->
 NtProtectVirtualMemory RWX -> 12-byte `mov rax,<stub>; jmp rax` mask over
-NtDelayExecution -> masked call polls KeQuerySystemTime -> byte-exact restore
--> done_flag=1 -> ret). Unlike the PE we ship, the blob is fully self-
-contained PIC: it never references a byte before its own entry (the 9-byte
-trampoline is a separate thing), so it can be placed at ANY RWX address and
-entered with a plain `call` — exactly what run-shell.ps1 does once
+NtDelayExecution -> masked call polls the KUSER_SHARED_DATA clock ->
+byte-exact restore -> done_flag=1 -> ret). Unlike the PE we ship, the blob is
+fully self-contained PIC: it never references a byte before its own entry (the
+9-byte trampoline is a separate thing), so it can be placed at ANY RWX address
+and entered with a plain `call` — exactly what run-shell.ps1 does once
 VirtualAlloc hands powershell.exe an arbitrary address and
 Marshal.GetDelegateForFunctionPointer turns it into a delegate.
 
@@ -21,7 +21,8 @@ prologues at runtime, not hard-coded):
   - NtProtectVirtualMemory the 12 NtDelayExecution bytes (RWX, then restore) —
     and NO other syscall (the masked call never reaches a syscall),
   - be observed writing the mask 48 B8 <8-byte ptr into the blob> FF E0,
-  - poll KeQuerySystemTime past the 250 ms timeout inside the mask,
+  - poll the KUSER_SHARED_DATA clock ([0x7FFE0014]) past the 250 ms timeout
+    inside the mask,
   - restore the original 12 bytes byte-exactly,
   - set done_flag, return to the return slot, R15 (sentinel) preserved.
 
@@ -46,6 +47,8 @@ from unicorn.x86_const import (  # noqa: E402
     UC_X86_REG_GS_BASE,
 )
 
+import run_harness as H  # noqa: E402  layout + thunks + the clock hook
+
 BLOB_BIN = ROOT / "build" / "sleepmask.bin"
 
 # Four arbitrary RWX landing addresses (same regions as test_shellcode_entry):
@@ -64,22 +67,18 @@ LDR_ADDR   = 0x00003000
 LDR_ENTRY  = 0x00004000
 NAME_ADDR  = 0x00005000
 NTDLL_BASE = 0x100000
-CLOCK      = 0x00500000
 STACK      = 0x00600000
 STACK_SZ   = 0x00020000
 
 ND_OFF  = 0x1000   # NtDelayExecution thunk
 NP_OFF  = 0x1100   # NtProtectVirtualMemory thunk
-KQ_OFF  = 0x1200   # KeQuerySystemTime (real code: advances CLOCK, returns &CLOCK)
+KQ_OFF  = 0x1200   # KeQuerySystemTime (dummy: the blob no longer resolves it)
 
 SENTINEL_R15 = 0x0123456789ABCDEF
 JUNK_RAX     = 0xDEADBEEFCAFEBABE
 
 NR_DELAY_REAL, NR_PROTECT_REAL = 0x3D, 0x2B
 NR_DELAY_DECOY, NR_PROTECT_DECOY = 0x4F, 0x5C
-
-TIMEOUT_VAL = 2500000   # in the blob: 2500000 * 100ns = 250 ms
-TICK        = 100000    # the fake KeQuery advances CLOCK by this per call
 
 NAMES = [b"NtDelayExecution\0", b"NtProtectVirtualMemory\0", b"KeQuerySystemTime\0"]
 
@@ -118,14 +117,13 @@ def build_env(uc, nr_delay, nr_protect):
         w(NTDLL_BASE + 0x400 + 2 * i, struct.pack("<H", i))
         w(NTDLL_BASE + 0x500 + 0x80 * i, name)
 
-    # --- the three "export" thunks ------------------------------------------
-    w(NTDLL_BASE + ND_OFF, bytes([0xB8, nr_delay, 0, 0, 0, 0x0F, 0x05, 0xC3,
-                                  0, 0, 0, 0]))
-    w(NTDLL_BASE + NP_OFF, bytes([0xB8, nr_protect, 0, 0, 0, 0x0F, 0x05, 0xC3,
-                                  0, 0, 0, 0]))
-    # KeQuerySystemTime: movabs rax,CLOCK ; add qword [rax],TICK ; ret
-    w(NTDLL_BASE + KQ_OFF,
-      b"\x48\xB8" + q(CLOCK) + b"\x48\x81\x00" + struct.pack("<I", TICK) + b"\xC3")
+    # --- the three "export" thunks (modern x64 layout) -----------------------
+    w(NTDLL_BASE + ND_OFF, H.make_thunk(nr_delay))
+    w(NTDLL_BASE + NP_OFF, H.make_thunk(nr_protect))
+    # KeQuerySystemTime dummy: mov rax, &SystemTime; ret (never called)
+    w(NTDLL_BASE + KQ_OFF, b"\x48\xB8" + q(H.SYS_TIME) + b"\xC3")
+    # KUSER_SHARED_DATA: the stub's clock source (SystemTime at +0x14)
+    w(H.SYS_TIME, q(H.CLOCK0))
 
 
 def run_one(base, off, nr_delay, nr_protect, blob: bytes) -> list:
@@ -134,7 +132,7 @@ def run_one(base, off, nr_delay, nr_protect, blob: bytes) -> list:
     uc.mem_map(0, 0x100000)                 # low page: gs:0x60 -> PEB chain
     uc.mem_map(NTDLL_BASE, 0x100000)        # fake ntdll
     uc.mem_map(base, SHELL_REGION)          # arbitrary RWX landing region
-    uc.mem_map(CLOCK, 0x100000)
+    uc.mem_map(H.SHARED, 0x100000)          # KUSER_SHARED_DATA (the clock)
     uc.mem_map(STACK, STACK_SZ)
     uc.reg_write(UC_X86_REG_GS_BASE, 0)
     build_env(uc, nr_delay, nr_protect)
@@ -160,6 +158,7 @@ def run_one(base, off, nr_delay, nr_protect, blob: bytes) -> list:
 
     uc.hook_add(UC_HOOK_CODE, on_code)
     uc.hook_add(UC_HOOK_MEM_WRITE, on_mem_write)
+    H.install_clock_hook(uc)
 
     uc.reg_write(UC_X86_REG_R15, SENTINEL_R15)
     uc.reg_write(UC_X86_REG_RAX, JUNK_RAX)
@@ -186,7 +185,7 @@ def run_one(base, off, nr_delay, nr_protect, blob: bytes) -> list:
     if uc.reg_read(UC_X86_REG_R15) != SENTINEL_R15:
         p.append(f"R15 clobbered: {uc.reg_read(UC_X86_REG_R15):#x}")
 
-    done_off = len(blob) - 84               # done_flag slot (data tail)
+    done_off = len(blob) - H.DONE_TAIL      # done_flag slot (data tail)
     done = struct.unpack("<Q", uc.mem_read(shell_addr + done_off, 8))[0]
     if done != 1:
         p.append(f"done_flag == {done}, expected 1")
@@ -200,9 +199,9 @@ def run_one(base, off, nr_delay, nr_protect, blob: bytes) -> list:
                  f"[{nr_protect:#x}, {nr_protect:#x}] (want exactly the two "
                  f"NtProtects; the masked NtDelayExecution must never syscall)")
 
-    clock = struct.unpack("<Q", uc.mem_read(CLOCK, 8))[0]
-    if not (TIMEOUT_VAL <= clock <= TIMEOUT_VAL + 2 * TICK):
-        p.append(f"clock {clock} did not poll past the {TIMEOUT_VAL} timeout")
+    clock = struct.unpack("<Q", uc.mem_read(H.SYS_TIME, 8))[0]
+    if not (H.TIMEOUT_VAL <= clock <= H.TIMEOUT_VAL + 2 * H.TICK):
+        p.append(f"clock {clock} did not poll past the {H.TIMEOUT_VAL} timeout")
 
     # the mask itself, observed in flight:
     byte_writes = {off_: val & 0xFF for off_, sz, val in mask_writes if sz == 1}
@@ -248,8 +247,8 @@ def main() -> int:
         return 1
     print("PASS (shellcode: the REAL sleepmask payload `call`ed at 4 arbitrary "
           "RWX addresses x real + decoy nr -> PEB-walk resolve, RWX mask over "
-          "NtDelayExecution observed in flight, 250 ms KeQuery poll, byte-exact "
-          "restore, done_flag=1, clean return; R15 preserved)")
+          "NtDelayExecution observed in flight, 250 ms shared-clock poll, "
+          "byte-exact restore, done_flag=1, clean return; R15 preserved)")
     return 0
 
 

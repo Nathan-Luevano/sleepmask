@@ -27,7 +27,8 @@ ways:
        - syscall trace == [0x2B, 0x2B] (two NtProtect, masked 0x3D absent)
        - done_flag == 1 in the PE image's OWN copy of the blob
        - NtDelayExecution's 12 original bytes restored
-       - the fake clock advanced (the mask actually slept)
+       - the KUSER_SHARED_DATA clock advanced past the 250 ms timeout
+         (the mask actually slept)
 
 PASS = all of the above. Exit 0 pass / 1 fail / 2 usage/build problem.
 """
@@ -137,19 +138,19 @@ def dynamic_check(uc: Uc, blob: bytes) -> list:
     p = []
     rd = uc.mem_read
 
-    done_off = len(blob) - 84  # done_flag slot, counted from the blob tail
+    done_off = len(blob) - H.DONE_TAIL  # done_flag slot, counted from the blob tail
     done = struct.unpack("<Q", bytes(rd(IMAGE_BASE + BLOB_RVA + done_off, 8)))[0]
     if done != 1:
         p.append(f"done_flag in PE image == {done}, expected 1")
 
     nt_delay = bytes(rd(H.NTDLL_BASE + 0x1000, 12))
-    expect_nt = bytes.fromhex("b83d0000000f05c300000000")
+    expect_nt = H.make_thunk(0x3D)[:12]
     if nt_delay != expect_nt:
         p.append(f"NtDelayExecution not restored: {nt_delay.hex()}")
 
-    clock = struct.unpack("<Q", bytes(rd(H.CLOCK, 8)))[0]
-    if clock < 2 * 100000:
-        p.append(f"clock advanced only {clock} (the mask never slept)")
+    clock = struct.unpack("<Q", bytes(rd(H.SYS_TIME, 8)))[0]
+    if not (H.TIMEOUT_VAL <= clock <= H.TIMEOUT_VAL + 2 * H.TICK):
+        p.append(f"shared clock {clock} did not poll past the {H.TIMEOUT_VAL} timeout")
 
     return p
 
@@ -187,10 +188,11 @@ def main() -> int:
     uc.mem_map(0x0, 0x100000)
     uc.mem_map(H.NTDLL_BASE, 0x100000)
     uc.mem_map(H.SC_BASE, 0x100000)
-    uc.mem_map(H.CLOCK, 0x100000)
+    uc.mem_map(H.SHARED, 0x100000)
     uc.mem_map(H.STACK, 0x20000)
     uc.mem_map(IMAGE_BASE, 0x10000)
-    H.build_env(uc)                      # fake PEB/Ldr/ntdll + return addr on stack
+    H.build_env(uc, blob)                # fake PEB/Ldr/ntdll + return addr on stack
+    H.install_clock_hook(uc)             # KUSER_SHARED_DATA clock: +TICK per read
     # load the image the way the Windows loader does: headers -> RVA 0, each
     # section's raw data -> its VirtualAddress. read the real offsets from the
     # section header rather than hard-coding them.
@@ -230,11 +232,11 @@ def main() -> int:
     for pr in problems:
         print(f"RUN FAIL: {pr}")
 
-    clock = struct.unpack("<Q", bytes(uc.mem_read(H.CLOCK, 8)))[0]
+    clock = struct.unpack("<Q", bytes(uc.mem_read(H.SYS_TIME, 8)))[0]
     print(f"entry:    0x{IMAGE_BASE + ENTRY_RVA:X} (trampoline) -> blob @ 0x{IMAGE_BASE + BLOB_RVA:X}")
     print(f"finished: rip=0x{rip:X} (trampoline spin loop — the blob's final ret landed here)")
     print(f"syscalls: {' '.join('0x%02X' % n for n in trace)}")
-    print(f"clock:    {clock} (keq calls: {clock // 100000})")
+    print(f"sys_time: {clock} (100ns units; timeout {H.TIMEOUT_VAL} = 250 ms)")
 
     if problems:
         print("FAIL")

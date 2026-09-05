@@ -13,7 +13,7 @@
 #                      nr: the SAC-proof run-shell.ps1 entry mode (no DLL image)
 #   8. windows-real    THE REAL PAYLOAD, same entry mode: sleepmask.bin `call`ed
 #                      at 4 arbitrary RWX addresses x real + decoy nr; mask over
-#                      NtDelayExecution observed in flight, 250 ms KeQuery poll,
+#                      NtDelayExecution observed in flight, 250 ms shared-clock poll,
 #                      byte-exact restore, done_flag=1
 #   9. macos           Mach-O: static fields + independent walk + run at base + slide
 #   10. macos-coupled  append_macho.py onto a host Mach-O; run in Unicorn (base + slide)

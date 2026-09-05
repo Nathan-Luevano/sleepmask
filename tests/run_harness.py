@@ -6,10 +6,16 @@ until it returns:
 
   [gs:0x60] -> PEB(+0x18 = Ldr) -> Ldr(+0x10 = head) -> LDR entry
   LDR entry: BaseDllName = "ntdll.dll" (UTF-16), DllBase = fake ntdll PE
-  The PE exports NtDelayExecution / NtProtectVirtualMemory as
-  `mov eax, NR; syscall; ret` thunks (so the shellcode can read the syscall
-  number from the export prologue), and KeQuerySystemTime as real code that
-  advances a qword clock by 100000 and returns its address in RAX.
+  The PE exports NtDelayExecution / NtProtectVirtualMemory as modern x64
+  thunks (`4C 8B D1 B8 <nr:4> F6 04 25 .. 75 03 0F 05 CC ...`), so the
+  shellcode reads the syscall number out of the export prologue at runtime,
+  plus KeQuerySystemTime as a dummy (the blob no longer resolves it: its
+  clock is KUSER_SHARED_DATA->SystemTime at [0x7FFE0014], read directly).
+
+The stub's clock is emulated the honest way: a MEM_READ hook on the
+KUSER_SHARED_DATA SystemTime qword advances it by TICK (10 ms) on every
+8-byte read, so the stub's poll loop sees time pass, exactly as a real
+CPU polling a live clock would.
 
 The CODE hook traps 0F 05: records eax (the NT syscall number), zeroes it,
 and steps RIP past it.
@@ -17,15 +23,19 @@ and steps RIP past it.
 PASS criteria:
   - the shellcode returns (RIP reaches RET_ADDR)
   - the syscall trace is exactly [0x2B, 0x2B] (two NtProtect, no 0x3D)
-  - done_flag (data slot 84 bytes from the blob tail) == 1
+  - done_flag (data slot 66 bytes from the blob tail) == 1
   - the original 12 bytes of NtDelayExecution are restored
+  - the shared clock advanced past the 250 ms timeout (the mask slept)
 """
 
 import struct
 import sys
 from pathlib import Path
 
-from unicorn import Uc, UC_ARCH_X86, UC_MODE_64, UC_HOOK_CODE
+from unicorn import (
+    Uc, UC_ARCH_X86, UC_MODE_64,
+    UC_HOOK_CODE, UC_HOOK_MEM_READ,
+)
 from unicorn.x86_const import (
     UC_X86_REG_RIP,
     UC_X86_REG_RAX,
@@ -35,7 +45,13 @@ from unicorn.x86_const import (
 
 ROOT = Path(__file__).resolve().parent.parent
 # usage: run_harness.py [blob.bin]  (default: build/sleepmask.bin)
-BLOB = (Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "build" / "sleepmask.bin").read_bytes()
+BLOB_PATH = (Path(sys.argv[1]) if len(sys.argv) > 1
+             else ROOT / "build" / "sleepmask.bin")
+
+
+def load_blob() -> bytes:
+    return BLOB_PATH.read_bytes()
+
 
 # --- layout ----------------------------------------------------------------
 PEB_ADDR   = 0x00002000
@@ -45,16 +61,23 @@ NAME_ADDR  = 0x00005000        # UTF-16LE "ntdll.dll"
 NTDLL_BASE = 0x100000          # fake ntdll.dll image
 SC_BASE    = 0x300000          # shellcode
 RET_ADDR   = 0x300800          # fake return address pushed on the stack
-CLOCK      = 0x0500000         # qword advanced by the fake KeQuerySystemTime
 STACK      = 0x0600000
 RSP0       = 0x0610000
 
-DONE_OFFSET = len(BLOB) - 84   # done_flag slot, counted from the blob tail
+# KUSER_SHARED_DATA is mapped at 0x7FFE0000 on every x64 Windows; SystemTime
+# (100ns since 1601) is the qword at +0x14. The stub polls it directly.
+SHARED      = 0x7FFE0000
+SYS_TIME    = SHARED + 0x14
+CLOCK0      = 0                # initial SystemTime (100ns since 1601)
+TICK        = 100000           # 10 ms in 100ns units; one poll step
+TIMEOUT_VAL = 2500000          # the blob's timeout: 250 ms in 100ns units
+
+DONE_TAIL = 66                 # done_flag slot, bytes counted from the blob tail
 
 EXPORTS = [                     # (name, thunk RVA inside the PE)
-    (b"NtDelayExecution\0",      0x1000),   # mov eax,0x3D; syscall; ret
-    (b"NtProtectVirtualMemory\0", 0x1100),  # mov eax,0x2B; syscall; ret
-    (b"KeQuerySystemTime\0",     0x1200),   # fake: advance CLOCK, return &CLOCK
+    (b"NtDelayExecution\0",      0x1000),
+    (b"NtProtectVirtualMemory\0", 0x1100),
+    (b"KeQuerySystemTime\0",     0x1200),   # dummy: the blob no longer resolves it
 ]
 
 
@@ -62,7 +85,39 @@ def _q(v):
     return struct.pack("<Q", v)
 
 
-def build_env(uc):
+def make_thunk(nr: int) -> bytes:
+    """A modern x64 ntdll syscall thunk (31 bytes, the real layout):
+
+       4C 8B D1          mov r10, rcx
+       B8 <nr:4>         mov eax, <nr>      <- the nr the blob scans for
+       F6 04 25 08 03    test byte [0x7FFE0308], 1
+       FE 7F 01
+       75 03             jne +3
+       0F 05             syscall
+       CC ...            int3 padding (real ntdll pads thunks this way)
+    """
+    t = (b"\x4C\x8B\xD1" + b"\xB8" + struct.pack("<I", nr)
+         + b"\xF6\x04\x25\x08\x03\xFE\x7F\x01"
+         + b"\x75\x03" + b"\x0F\x05")
+    return t + b"\xCC" * (31 - len(t))
+
+
+def install_clock_hook(uc):
+    """MEM_READ hook: every read of the KUSER_SHARED_DATA clock qword
+    (SystemTime at 0x7FFE0014) advances it by TICK, so a stub polling the
+    clock in a tight loop observes time passing, as on real hardware."""
+    state = {"clock": CLOCK0}
+
+    def on_mem_read(uc_, access, address, size, value, ud):
+        if SYS_TIME <= address < SYS_TIME + 8:
+            new = state["clock"] + TICK
+            state["clock"] = new
+            uc_.mem_write(address, _q(new))
+
+    uc.hook_add(UC_HOOK_MEM_READ, on_mem_read)
+
+
+def build_env(uc, blob: bytes):
     w = uc.mem_write
     # --- PEB / LDR chain ----------------------------------------------
     w(0x60, _q(PEB_ADDR))
@@ -92,26 +147,32 @@ def build_env(uc):
         w(NTDLL_BASE + 0x400 + 2 * i, struct.pack("<H", i))
         w(NTDLL_BASE + 0x500 + 0x80 * i, name)
 
-    # --- function thunks -------------------------------------------------
-    w(NTDLL_BASE + 0x1000, b"\xB8\x3D\x00\x00\x00\x0F\x05\xC3")  # NtDelayExecution
-    w(NTDLL_BASE + 0x1100, b"\xB8\x2B\x00\x00\x00\x0F\x05\xC3")  # NtProtectVirtualMemory
-    # fake KeQuerySystemTime: movabs rax,CLOCK ; add qword [rax],100000 ; ret
-    w(NTDLL_BASE + 0x1200,
-      b"\x48\xB8" + _q(CLOCK) + b"\x48\x81\x00\xA0\x86\x01\x00\xC3")
+    # --- the export thunks ---------------------------------------------
+    w(NTDLL_BASE + 0x1000, make_thunk(0x3D))   # NtDelayExecution
+    w(NTDLL_BASE + 0x1100, make_thunk(0x2B))   # NtProtectVirtualMemory
+    # KeQuerySystemTime dummy: mov rax, &SystemTime; ret (never called)
+    w(NTDLL_BASE + 0x1200, b"\x48\xB8" + _q(SYS_TIME) + b"\xC3")
+
+    # --- KUSER_SHARED_DATA: the stub's clock source ----------------------
+    w(SYS_TIME, _q(CLOCK0))
 
     # --- shellcode + fake stack ------------------------------------------
-    w(SC_BASE, BLOB)
+    w(SC_BASE, blob)
     w(RSP0, _q(RET_ADDR))
 
 
 def main():
+    blob = load_blob()
+    DONE_OFFSET = len(blob) - DONE_TAIL   # done_flag slot, from the blob tail
+
     uc = Uc(UC_ARCH_X86, UC_MODE_64)
     uc.mem_map(0x0, 0x100000)
     uc.mem_map(NTDLL_BASE, 0x100000)
     uc.mem_map(SC_BASE, 0x100000)
-    uc.mem_map(CLOCK, 0x100000)
+    uc.mem_map(SHARED, 0x100000)
     uc.mem_map(STACK, 0x20000)
-    build_env(uc)
+    build_env(uc, blob)
+    install_clock_hook(uc)
     uc.reg_write(UC_X86_REG_GS_BASE, 0)
     uc.reg_write(UC_X86_REG_RSP, RSP0)
 
@@ -141,13 +202,13 @@ def main():
 
     done = struct.unpack("<Q", rd(SC_BASE + DONE_OFFSET, 8))[0]
     nt_delay = rd(NTDLL_BASE + 0x1000, 12)
-    expect_nt = bytes.fromhex("b83d0000000f05c300000000")
-    clock = struct.unpack("<Q", rd(CLOCK, 8))[0]
+    expect_nt = make_thunk(0x3D)[:12]
+    clock = struct.unpack("<Q", rd(SYS_TIME, 8))[0]
 
-    print(f"blob size:   {len(BLOB)} bytes")
+    print(f"blob size:   {len(blob)} bytes")
     print(f"done_flag:   {done} (at blob offset {DONE_OFFSET} / 0x{DONE_OFFSET:X})")
     print(f"syscalls:    {' '.join('0x%02X' % n for n in trace)}")
-    print(f"clock:       {clock} (keq calls: {clock // 100000})")
+    print(f"sys_time:    {clock} (100ns units; timeout {TIMEOUT_VAL} = 250 ms)")
     print(f"ntdelay[12]: {nt_delay.hex(' ')}")
 
     ok = True
@@ -159,6 +220,9 @@ def main():
         ok = False
     if nt_delay != expect_nt:
         print("FAIL: NtDelayExecution prologue not restored")
+        ok = False
+    if not (TIMEOUT_VAL <= clock <= TIMEOUT_VAL + 2 * TICK):
+        print(f"FAIL: clock {clock} did not poll past the {TIMEOUT_VAL} timeout")
         ok = False
     print("PASS" if ok else "FAIL")
     sys.exit(0 if ok else 1)
