@@ -5,11 +5,13 @@
 ; What it does (build+test only, never deployed):
 ;   1. PEB (gs:0x60) -> PEB_Ldr (PEB+0x18) -> InLoadOrder list -> ntdll.dll
 ;   2. Parse PE exports (DataDirectory[0]) -> EAT / ENT / ORD
-;   3. Resolve NtDelayExecution, NtProtectVirtualMemory, KeQuerySystemTime
-;   4. Read each syscall nr from its export prologue (B8 ?? ?? ?? ?? 0F 05)
+;   3. Resolve NtDelayExecution, NtProtectVirtualMemory
+;   4. Read each syscall nr from its export prologue (forward-scan for the
+;      nr mov: `B8 <nr:4>` or `48 C7 C0 <nr:4>`)
 ;   5. NtProtectVirtualMemory(RWX) over the NtDelayExecution text
 ;   6. Patch NtDelayExecution: `mov rax,<stub>; jmp rax` (12 bytes)
-;   7. call [NtDelayExecution] -> stub: poll KeQuerySystemTime, restore bytes, ret
+;   7. call [NtDelayExecution] -> stub: poll the KUSER_SHARED_DATA clock
+;      ([0x7FFE0014] = SystemTime), restore bytes, ret
 ;   8. NtProtectVirtualMemory(restore); done_flag=1; ret
 ;
 ; PIC: base (r12) resolved at entry via call/pop; every data ref is
@@ -95,7 +97,7 @@ sym_base:
     add r10, r9
     mov [r12 + (ord_base - sym_base)], r10
 
-    ; ---- 3. resolve the three functions ---------------------------------
+    ; ---- 3. resolve the two functions ------------------------------------
     lea rsi, [r12 + (s_ntdelay - sym_base)]
     mov rdx, 16
     call find_export
@@ -104,10 +106,6 @@ sym_base:
     mov rdx, 22
     call find_export
     mov [r12 + (saved_ntprotect - sym_base)], rax
-    lea rsi, [r12 + (s_keq - sym_base)]
-    mov rdx, 17
-    call find_export
-    mov [r12 + (saved_keq - sym_base)], rax
 
     ; ---- 4. read syscall numbers from export prologues ------------------
     mov rsi, [r12 + (saved_ntdelay - sym_base)]
@@ -181,15 +179,17 @@ sym_base:
 ; ---------------------------------------------------------------------------
 ; the mask stub — entered via the patched `jmp rax`, r12 still = base
 ; ---------------------------------------------------------------------------
+; KUSER_SHARED_DATA is mapped at 0x7FFE0000 on every x64 Windows;
+; SystemTime (100ns since 1601) is at +0x14. No exports, no calls.
 .stub:
-    mov rax, [r12 + (saved_keq - sym_base)]
-    call rax
-    mov r11, rax
-    mov rax, [r11]
+    ; absolute clock load idiom: `mov eax,imm32` zero-extends into rax, then [rax].
+    ; NOT `mov rax,[0x7FFE0014]` — nasm encodes that as 48 8B 04 25 ... (a redundant
+    ; SIB form) which real Intel/AMD HW mis-decodes as `mov rax,[rsp]` + `sub eax,..`.
+    mov eax, 0x7FFE0014
+    mov rax, [rax]
     mov [r12 + (data_t0 - sym_base)], rax
 .st_wait:
-    mov rax, [r12 + (saved_keq - sym_base)]
-    call rax
+    mov eax, 0x7FFE0014
     mov rax, [rax]
     sub rax, [r12 + (data_t0 - sym_base)]
     cmp rax, [r12 + (timeout_val - sym_base)]
@@ -278,23 +278,34 @@ cmp_u16_ci:
     ret
 
 ; sysnr_from: rsi=fn -> eax=nr (32-bit)
-;   scans for the `B8 ?? ?? ?? ?? 0F 05` thunk, returns the imm32
+;   forward-scans offsets 0..23 for the first nr mov:
+;     `B8 <nr:4>`        (mov eax,nr)   — legacy + modern ntdll thunks
+;     `48 C7 C0 <nr:4>`  (mov rax,nr)   — alternate encoder
+;   the modern x64 thunk is `4C 8B D1 B8 <nr:4> F6 ... 0F 05`, so the B8
+;   sits at offset 3 behind the `mov r10,rcx` preamble; first match wins.
+;   clobbers rax, r10, r11
 sysnr_from:
-    mov r10, 5
+    xor r10, r10
 .snr_scan:
-    cmp byte [rsi + r10], 0x0F
-    jne .snr_next
-    cmp byte [rsi + r10 + 1], 0x05
-    jne .snr_next
-    cmp byte [rsi + r10 - 5], 0xB8
-    jne .snr_next
-    mov eax, [rsi + r10 - 4]
-    ret
-.snr_next:
+    cmp byte [rsi + r10], 0x48
+    je .snr_rax
+    cmp byte [rsi + r10], 0xB8
+    je .snr_eax
+.snr_adv:
     inc r10
     cmp r10, 24
     jb .snr_scan
     xor eax, eax
+    ret
+.snr_rax:
+    cmp byte [rsi + r10 + 1], 0xC7
+    jne .snr_adv
+    cmp byte [rsi + r10 + 2], 0xC0
+    jne .snr_adv
+    mov eax, [rsi + r10 + 3]
+    ret
+.snr_eax:
+    mov eax, [rsi + r10 + 1]
     ret
 
 ; find_export: rsi=name(ascii), rdx=len -> rax=fn abs addr (0 if not found)
@@ -341,7 +352,6 @@ find_export:
 saved_bytes:    resq 2                 ; 12 bytes (+4 pad) of NtDelayExecution
 saved_ntdelay:  resq 1
 saved_ntprotect:resq 1
-saved_keq:      resq 1
 saved_old_prot: resq 1
 prot_base:      resq 1
 prot_size:      resq 1
@@ -358,5 +368,4 @@ data_t0:        resq 1
 done_flag:      resq 1
 s_ntdelay:      db "NtDelayExecution", 0
 s_ntprotect:    db "NtProtectVirtualMemory", 0
-s_keq:          db "KeQuerySystemTime", 0
 s_ntdll_u16:    dw 'n','t','d','l','l','.','d','l','l'
