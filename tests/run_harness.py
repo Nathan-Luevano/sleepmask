@@ -23,9 +23,11 @@ it checks RSP 16-alignment, reads the args the way nt!KiSystemCall64 does
 them against the blob, writes the NtProtectVirtualMemory OldProtect out-param,
 zeroes RAX (STATUS_SUCCESS) and steps RIP past the instruction.
 
-The entry RSP is 8 mod 16: a real `call blob` leaves the return address at
-[RSP] with RSP ≡ 8 (mod 16), which is what the shellcode's syscall reservation
-(`sub rsp, 0x38` before each `syscall`) is aligned against.
+The blob is run at four entry RSP classes (0, 4, 8, 12 mod 16). A real
+`call blob` lands at ≡ 8 (mod 16), but the blob must not depend on that: it
+establishes the 16-byte RSP alignment itself before each `syscall`
+(`mov r13, rsp; and rsp, -16`), so any caller frame the loader/injector leaves
+it on is fine. Every one of the four entries must pass.
 
 PASS criteria:
   - the shellcode returns (RIP reaches RET_ADDR)
@@ -75,12 +77,13 @@ NTDLL_BASE = 0x100000          # fake ntdll.dll image
 SC_BASE    = 0x300000          # shellcode
 RET_ADDR   = 0x300800          # fake return address pushed on the stack
 STACK      = 0x0600000
-# RSP at blob entry. A real `call blob` leaves the return address at [RSP] with
-# RSP = 8 (mod 16) (the return address is an 8-byte push off a 16-aligned frame).
-# The shellcode's syscall reservation (`sub rsp,0x38` before each `syscall`) is
-# aligned against that: entry 8 -> 8 pushes (0) -> call/pop (0) -> sub 0x30 (0)
-# -> sub 0x38 (8) => RSP = 0 (mod 16) at the `syscall`, as x64 Windows requires.
+# The RSP of a real `call blob`: the return address is an 8-byte push off a
+# 16-aligned frame, so at blob entry RSP ≡ 8 (mod 16).
 RSP0       = 0x0610008
+# Entry RSP classes to prove the blob is caller-independent: the ≡ 8 class a
+# `call` gives, plus jump/injector frames the blob cannot assume. All four must
+# produce RSP ≡ 0 at every `syscall`.
+ENTRIES    = (0x0610000, 0x0610004, RSP0, 0x061000C)
 
 # KUSER_SHARED_DATA is mapped at 0x7FFE0000 on every x64 Windows; SystemTime
 # (100ns since 1601) is the qword at +0x14. The stub polls it directly.
@@ -136,7 +139,7 @@ def install_clock_hook(uc):
     uc.hook_add(UC_HOOK_MEM_READ, on_mem_read)
 
 
-def build_env(uc, blob: bytes):
+def build_env(uc, blob: bytes, rsp0: int):
     w = uc.mem_write
     # --- PEB / LDR chain ----------------------------------------------
     w(0x60, _q(PEB_ADDR))
@@ -177,23 +180,21 @@ def build_env(uc, blob: bytes):
 
     # --- shellcode + fake stack ------------------------------------------
     w(SC_BASE, blob)
-    w(RSP0, _q(RET_ADDR))
+    w(rsp0, _q(RET_ADDR))
 
 
-def main():
-    blob = load_blob()
-    DONE_OFFSET = len(blob) - DONE_TAIL   # done_flag slot, from the blob tail
-
+def run_case(rsp0: int, blob: bytes, done_offset: int):
+    """Run the blob with the given entry RSP. Returns (ok, report_lines)."""
     uc = Uc(UC_ARCH_X86, UC_MODE_64)
     uc.mem_map(0x0, 0x100000)
     uc.mem_map(NTDLL_BASE, 0x100000)
     uc.mem_map(SC_BASE, 0x100000)
     uc.mem_map(SHARED, 0x100000)
     uc.mem_map(STACK, 0x20000)
-    build_env(uc, blob)
+    build_env(uc, blob, rsp0)
     install_clock_hook(uc)
     uc.reg_write(UC_X86_REG_GS_BASE, 0)
-    uc.reg_write(UC_X86_REG_RSP, RSP0)
+    uc.reg_write(UC_X86_REG_RSP, rsp0)
 
     trace = []            # syscall nr per 0F 05, in order
     abi_fail = []         # human-readable ABI violations
@@ -255,52 +256,70 @@ def main():
         rip = uc.reg_read(UC_X86_REG_RIP)
         if rip == RET_ADDR:
             break
-    else:
-        print(f"FAIL: stuck at rip=0x{rip:X} after {len(trace)} syscalls")
-        sys.exit(1)
+    stuck = rip != RET_ADDR
 
     def rd(addr, n):
         return bytes(uc.mem_read(addr, n))
 
-    done = struct.unpack("<Q", rd(SC_BASE + DONE_OFFSET, 8))[0]
+    done = struct.unpack("<Q", rd(SC_BASE + done_offset, 8))[0]
     nt_delay = rd(NTDLL_BASE + 0x1000, 12)
     expect_nt = make_thunk(0x3D)[:12]
     clock = struct.unpack("<Q", rd(SYS_TIME, 8))[0]
 
-    print(f"blob size:   {len(blob)} bytes")
-    print(f"done_flag:   {done} (at blob offset {DONE_OFFSET} / 0x{DONE_OFFSET:X})")
-    print(f"syscalls:    {' '.join('0x%02X' % n for n in trace)}")
-    print(f"prot calls:  {' '.join('0x%02X' % p for p in prot_calls) or '(none)'}")
-    print(f"final prot:  0x{kern['prot']:02X} (0x20 = original PAGE_EXECUTE_READ)")
-    print(f"sys_time:    {clock} (100ns units; timeout {TIMEOUT_VAL} = 250 ms)")
-    print(f"ntdelay[12]: {nt_delay.hex(' ')}")
+    lines = [
+        f"syscalls:    {' '.join('0x%02X' % n for n in trace)}",
+        f"prot calls:  {' '.join('0x%02X' % p for p in prot_calls) or '(none)'}",
+        f"final prot:  0x{kern['prot']:02X} (0x20 = original PAGE_EXECUTE_READ)",
+        f"done_flag:   {done} (at blob offset {done_offset} / 0x{done_offset:X})",
+        f"sys_time:    {clock} (100ns units; timeout {TIMEOUT_VAL} = 250 ms)",
+        f"ntdelay[12]: {nt_delay.hex(' ')}",
+    ]
 
     ok = True
+    if stuck:
+        lines.append(f"FAIL: stuck at rip=0x{rip:X} after {len(trace)} syscalls")
+        ok = False
     if trace != [0x2B, 0x2B]:
-        print(f"FAIL: syscalls {[hex(n) for n in trace]} != [0x2B, 0x2B] (want two NtProtect, no 0x3D)")
+        lines.append(f"FAIL: syscalls {[hex(n) for n in trace]} != [0x2B, 0x2B] (want two NtProtect, no 0x3D)")
         ok = False
     if abi_fail:
-        print("FAIL: syscall ABI violations (kernel would not see these args):")
+        lines.append("FAIL: syscall ABI violations (kernel would not see these args):")
         for f in abi_fail:
-            print(f"  {f}")
+            lines.append(f"  {f}")
         ok = False
     if prot_calls != [0x40, 0x20]:
-        print(f"FAIL: prot calls {[hex(p) for p in prot_calls]} != [0x40, 0x20] (set RWX then restore original)")
+        lines.append(f"FAIL: prot calls {[hex(p) for p in prot_calls]} != [0x40, 0x20] (set RWX then restore original)")
         ok = False
     if kern["prot"] != 0x20:
-        print(f"FAIL: final prot 0x{kern['prot']:02X} != 0x20 (original protection not restored)")
+        lines.append(f"FAIL: final prot 0x{kern['prot']:02X} != 0x20 (original protection not restored)")
         ok = False
     if done != 1:
-        print(f"FAIL: done_flag == {done}, expected 1")
+        lines.append(f"FAIL: done_flag == {done}, expected 1")
         ok = False
     if nt_delay != expect_nt:
-        print("FAIL: NtDelayExecution prologue not restored")
+        lines.append("FAIL: NtDelayExecution prologue not restored")
         ok = False
     if not (TIMEOUT_VAL <= clock <= TIMEOUT_VAL + 2 * TICK):
-        print(f"FAIL: clock {clock} did not poll past the {TIMEOUT_VAL} timeout")
+        lines.append(f"FAIL: clock {clock} did not poll past the {TIMEOUT_VAL} timeout")
         ok = False
-    print("PASS" if ok else "FAIL")
-    sys.exit(0 if ok else 1)
+    if ok:
+        lines.append("PASS")
+    return ok, lines
+
+
+def main():
+    blob = load_blob()
+    done_offset = len(blob) - DONE_TAIL   # done_flag slot, from the blob tail
+    print(f"blob size:   {len(blob)} bytes")
+
+    all_ok = True
+    for rsp0 in ENTRIES:
+        ok, lines = run_case(rsp0, blob, done_offset)
+        print(f"--- entry RSP0=0x{rsp0:05X} (rsp % 16 = {rsp0 % 16}) ---")
+        for line in lines:
+            print(line)
+        all_ok &= ok
+    sys.exit(0 if all_ok else 1)
 
 
 if __name__ == "__main__":

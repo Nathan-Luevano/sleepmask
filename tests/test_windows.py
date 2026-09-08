@@ -191,7 +191,7 @@ def main() -> int:
     uc.mem_map(H.SHARED, 0x100000)
     uc.mem_map(H.STACK, 0x20000)
     uc.mem_map(IMAGE_BASE, 0x10000)
-    H.build_env(uc, blob)                # fake PEB/Ldr/ntdll + return addr on stack
+    H.build_env(uc, blob, H.RSP0)        # fake PEB/Ldr/ntdll + return addr on stack
     H.install_clock_hook(uc)             # KUSER_SHARED_DATA clock: +TICK per read
     # load the image the way the Windows loader does: headers -> RVA 0, each
     # section's raw data -> its VirtualAddress. read the real offsets from the

