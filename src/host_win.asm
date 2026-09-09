@@ -28,7 +28,7 @@ sym_base:
     mov r13, [r14]
 .peb_walk:
     mov rsi, [r13 + 0x60]
-    mov rdx, [r13 + 0x58]
+    movzx rdx, word [r13 + 0x58]
     shr rdx, 1
     lea r8, [r12 + (s_ntdll_u16 - sym_base)]
     mov r9, 9
