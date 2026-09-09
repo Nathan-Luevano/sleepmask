@@ -167,7 +167,7 @@ public static class SleepmaskShell {
     }
     public static long ReadQ(IntPtr mem, long off) {
         byte[] buf = new byte[8];
-        Marshal.Copy(mem, buf, (int)off, 8);
+        Marshal.Copy(new IntPtr(mem.ToInt64() + off), buf, 0, 8);
         return BitConverter.ToInt64(buf, 0);
     }
 }
