@@ -202,7 +202,7 @@ def build_env(uc, nr_write, nr_create, nr_close, nr_term):
     w(LDR_ADDR + 0x10, struct.pack(q, LDR_ENTRY))    # InLoadOrder head
     w(LDR_ENTRY + 0x00, struct.pack(q, LDR_ADDR + 0x10))  # Flink (circular)
     w(LDR_ENTRY + 0x30, struct.pack(q, NTDLL_BASE))  # DllBase
-    w(LDR_ENTRY + 0x58, struct.pack("<H", 18))       # BaseDllName.Length
+    w(LDR_ENTRY + 0x58, struct.pack("<HH", 18, 20))  # BaseDllName {Length,MaxLength}
     w(LDR_ENTRY + 0x60, struct.pack(q, NAME_ADDR))   # BaseDllName.Buffer
     w(NAME_ADDR, "ntdll.dll".encode("utf-16-le"))
 

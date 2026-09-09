@@ -147,7 +147,7 @@ def build_env(uc, blob: bytes, rsp0: int):
     w(LDR_ADDR + 0x10, _q(LDR_ENTRY))         # InLoadOrderModuleList head
     w(LDR_ENTRY + 0x00, _q(LDR_ADDR + 0x10))  # Flink: entry -> head (circular)
     w(LDR_ENTRY + 0x30, _q(NTDLL_BASE))       # DllBase
-    w(LDR_ENTRY + 0x58, struct.pack("<H", 18))  # BaseDllName.Length (bytes)
+    w(LDR_ENTRY + 0x58, struct.pack("<HH", 18, 20))  # BaseDllName {Length=18, MaxLength=20}
     w(LDR_ENTRY + 0x60, _q(NAME_ADDR))        # BaseDllName.Buffer
     w(NAME_ADDR, "ntdll.dll".encode("utf-16-le"))
 
