@@ -115,21 +115,22 @@ sym_base:
     mov [r12 + (stdout_hdl - sym_base)], rax
 
     ; ---- 6. NtWriteFile(stdout, 0, 0, 0, &iosb, msg, len, 0, 0) -----------
-    sub rsp, 0x50
+    sub rsp, 0x58
     lea r9, [r12 + (iosb - sym_base)]
-    mov [rsp + 0x20], r9
-    lea r9, [r12 + (msg - sym_base)]
     mov [rsp + 0x28], r9
-    mov dword [rsp + 0x30], msglen
+    lea r9, [r12 + (msg - sym_base)]
+    mov [rsp + 0x30], r9
+    mov dword [rsp + 0x38], msglen
     mov r9d, 0
-    mov [rsp + 0x38], r9
     mov [rsp + 0x40], r9
+    mov [rsp + 0x48], r9
     mov rcx, [r12 + (stdout_hdl - sym_base)]
+    mov r10, rcx
     xor rdx, rdx
     xor r8d, r8d
     mov eax, [r12 + (data_nr - sym_base)]
     syscall
-    add rsp, 0x50
+    add rsp, 0x58
 
     ; ---- 7. resolve NtCreateFile + NtClose (best effort) ------------------
     lea rsi, [r12 + (s_ntcreate - sym_base)]
@@ -165,44 +166,47 @@ sym_base:
     ; ---- 9. NtCreateFile(&fh_out, 0x12019F, &oa, &iosb, 0, 0x80, 7, 2, ..)
     xor rax, rax
     mov [r12 + (fh_out - sym_base)], rax
-    sub rsp, 0x58
+    sub rsp, 0x68
     lea rax, [r12 + (fh_out - sym_base)]
     mov rcx, rax
+    mov r10, rcx
     mov edx, 0x12019F
     lea r8, [r12 + (oa - sym_base)]
     lea r9, [r12 + (iosb - sym_base)]
-    mov qword [rsp + 0x20], 0
-    mov qword [rsp + 0x28], 0x80
-    mov qword [rsp + 0x30], 7
-    mov qword [rsp + 0x38], 2
-    mov qword [rsp + 0x40], 0x42
-    mov qword [rsp + 0x48], 0
+    mov qword [rsp + 0x28], 0
+    mov qword [rsp + 0x30], 0x80
+    mov qword [rsp + 0x38], 7
+    mov qword [rsp + 0x40], 2
+    mov qword [rsp + 0x48], 0x42
     mov qword [rsp + 0x50], 0
+    mov qword [rsp + 0x58], 0
     mov eax, [r12 + (nr_create - sym_base)]
     syscall
-    add rsp, 0x58
+    add rsp, 0x68
 
     ; ---- 10. if it opened, write the token to the file, then close --------
     mov rax, [r12 + (fh_out - sym_base)]
     test rax, rax
     jz .file_done
-    sub rsp, 0x50
+    sub rsp, 0x58
     lea r9, [r12 + (iosb - sym_base)]
-    mov [rsp + 0x20], r9
-    lea r9, [r12 + (msg - sym_base)]
     mov [rsp + 0x28], r9
-    mov dword [rsp + 0x30], msglen
+    lea r9, [r12 + (msg - sym_base)]
+    mov [rsp + 0x30], r9
+    mov dword [rsp + 0x38], msglen
     mov r9d, 0
-    mov [rsp + 0x38], r9
     mov [rsp + 0x40], r9
+    mov [rsp + 0x48], r9
     mov rcx, [r12 + (fh_out - sym_base)]
+    mov r10, rcx
     xor rdx, rdx
     xor r8d, r8d
     mov eax, [r12 + (data_nr - sym_base)]
     syscall
-    add rsp, 0x50
+    add rsp, 0x58
     sub rsp, 8
     mov rcx, [r12 + (fh_out - sym_base)]
+    mov r10, rcx
     mov eax, [r12 + (nr_close - sym_base)]
     syscall
     add rsp, 8
