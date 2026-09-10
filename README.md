@@ -186,7 +186,7 @@ Layer notes:
   full dual trace, a clean return to the return slot, and the R15 sentinel,
   under real and decoy nr.
 - **windows-real** — the same SAC-proof entry mode, but the blob is the
-  **real 1366-byte sleepmask payload** (not the beacon): `call`-entered at four
+   **real 1376-byte sleepmask payload** (not the beacon): `call`-entered at four
   arbitrary RWX addresses, it walks the live PEB, reads the real syscall
   numbers out of the export prologues, then repeats three 250 ms cycles of
   `NtProtectVirtualMemory(RWX)` → mask `NtDelayExecution` in place → poll the
@@ -199,7 +199,7 @@ Layer notes:
 - **macos** — `tools/mk_macho.py` writes the Mach-O; the test walks the load
   commands with an independent generic walker, then runs in Unicorn at the
   nominal base and again slid `+0x1000` (the PIC check).
-- **harness** — the raw 1366-byte Windows blob against a hand-built fake
+- **harness** — the raw 1376-byte Windows blob against a hand-built fake
   PEB/ntdll: PEB walk → export parse → syscall-number extraction → three
   cycles of `NtProtectVirtualMemory(RWX)` → mask install → byte restore. The
   fake clock is the honest version: a MEM_READ hook on the `KUSER_SHARED_DATA`
