@@ -92,6 +92,9 @@ def run_shell(base, off, nr_write, nr_create, nr_close, nr_term, beacon: bytes) 
     rip = uc.reg_read(UC_X86_REG_RIP)
     if rip != ret_addr:
         p.append(f"RIP {rip:#x} != return slot {ret_addr:#x} (beacon did not return)")
+    create_status = struct.unpack("<Q", uc.mem_read(shell_addr + len(beacon) - 8, 8))[0]
+    if create_status != 0:
+        p.append(f"create_status {create_status:#x} != 0 (NtCreateFile failed)")
     r15 = uc.reg_read(UC_X86_REG_R15)
 
     stdout_writes = [w for w in writes if w[0] == "write" and w[1] == td.STDOUT_HDL]

