@@ -223,53 +223,56 @@ resolve:
 ; write_to: rcx=handle, rsi=buf, rdx=len -> rax=STATUS
 ;   NtWriteFile(handle, 0, 0, 0, &iosb, buf, len, 0, 0)
 write_to:
-    sub rsp, 0x48
+    sub rsp, 0x60
     lea r10, [r12 + (iosb - sym_base)]
-    mov [rsp + 0x20], r10
-    mov [rsp + 0x28], rsi
-    mov [rsp + 0x30], rdx
-    mov qword [rsp + 0x38], 0
+    mov [rsp + 0x28], r10
+    mov [rsp + 0x30], rsi
+    mov [rsp + 0x38], rdx
     mov qword [rsp + 0x40], 0
+    mov qword [rsp + 0x48], 0
     xor edx, edx
     xor r8d, r8d
     xor r9d, r9d
+    mov r10, rcx
     mov eax, [r12 + (nr_write - sym_base)]
     syscall
-    add rsp, 0x48
+    add rsp, 0x60
     ret
 
 ; create_file: -> rax=STATUS ; handle lands in fh_out
 ;   NtCreateFile(&fh_out, 0x12019F, &oa, &iosb, 0, 0x80, 7, 2, 0x42, 0, 0)
 create_file:
-    sub rsp, 0x58
+    sub rsp, 0x60
     lea r10, [r12 + (fh_out - sym_base)]
     mov rcx, r10
     mov edx, 0x12019F
     lea r8, [r12 + (oa - sym_base)]
     lea r9, [r12 + (iosb - sym_base)]
-    mov qword [rsp + 0x20], 0
-    mov qword [rsp + 0x28], 0x80
-    mov qword [rsp + 0x30], 7
-    mov qword [rsp + 0x38], 2
-    mov qword [rsp + 0x40], 0x42
-    mov qword [rsp + 0x48], 0
+    mov qword [rsp + 0x28], 0
+    mov qword [rsp + 0x30], 0x80
+    mov qword [rsp + 0x38], 7
+    mov qword [rsp + 0x40], 2
+    mov qword [rsp + 0x48], 0x42
     mov qword [rsp + 0x50], 0
+    mov qword [rsp + 0x58], 0
     mov eax, [r12 + (nr_create - sym_base)]
     syscall
-    add rsp, 0x58
+    add rsp, 0x60
     ret
 
 ; close_fh: rcx=handle -> rax=STATUS
 close_fh:
-    sub rsp, 8
+    sub rsp, 0x30
+    mov r10, rcx
     mov eax, [r12 + (nr_close - sym_base)]
     syscall
-    add rsp, 8
+    add rsp, 0x30
     ret
 
 ; term_proc: rcx=exit status
 term_proc:
-    sub rsp, 8
+    sub rsp, 0x30
+    mov r10, rcx
     mov eax, [r12 + (nr_term - sym_base)]
     syscall
     ud2
@@ -332,14 +335,18 @@ line_write:
     mov rsi, r11
     mov rdx, r10
     mov ecx, 1
+    sub rsp, 8
     call write_to
+    add rsp, 8
     mov rax, [r12 + (fh_out - sym_base)]
     test rax, rax
     jz .lw_done
     mov rcx, rax
     lea rsi, [r12 + (linebuf - sym_base)]
     mov rdx, r13
+    sub rsp, 8
     call write_to
+    add rsp, 8
 .lw_done:
     ret
 
