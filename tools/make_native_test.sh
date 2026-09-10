@@ -135,9 +135,9 @@ cat > build/native-test/run-shell.ps1 <<'PS1'
 #                   sleepmask_beacon.txt file artifact in this folder)
 #   sleepmask.bin   the REAL flagship payload: walks the live PEB to find
 #                   ntdll, reads the real syscall numbers out of the export
-#                   prologues at runtime, masks NtDelayExecution in place,
-#                   sleeps 250 ms through the mask, restores the original
-#                   bytes byte-exact, sets its done_flag, and rets.
+#                   prologues at runtime, does three 250 ms cycles of: mask
+#                   NtDelayExecution in place, poll through the mask, restore
+#                   the original bytes byte-exact; then sets its done_flag and rets.
 #
 # A strict App Control / WDAC policy can drop PowerShell into Constrained
 # Language Mode, which disables Add-Type. We report the mode up front so a

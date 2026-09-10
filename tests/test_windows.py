@@ -27,8 +27,8 @@ ways:
        - syscall trace == [0x2B]*6 (six NtProtect: 3 cycles x set+restore, masked 0x3D absent)
        - done_flag == 1 in the PE image's OWN copy of the blob
        - NtDelayExecution's 12 original bytes restored
-       - the KUSER_SHARED_DATA clock advanced past the 250 ms timeout
-         (the mask actually slept)
+       - the KUSER_SHARED_DATA clock advanced past the 3 x 250 ms timeout
+         (3 beacon cycles; the mask actually slept)
 
 PASS = all of the above. Exit 0 pass / 1 fail / 2 usage/build problem.
 """

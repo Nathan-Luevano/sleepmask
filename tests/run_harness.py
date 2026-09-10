@@ -36,7 +36,7 @@ PASS criteria (default, --fail-protect off):
   - the NtProtect calls set RWX then restore the original protection
   - done_flag (data slot 82 bytes from the blob tail) == 1; beacon_cycles (226) == 0
   - the original 12 bytes of NtDelayExecution are restored
-  - the shared clock advanced past the 250 ms timeout (the mask slept)
+  - the shared clock advanced past the 3 x 250 ms timeout (3 beacon cycles; the mask slept)
 
 PASS criteria (--fail-protect): the kernel fails NtProtectVirtualMemory
 (STATUS_INVALID_HANDLE), so the blob must fall back to a direct NtDelayExecution
@@ -45,7 +45,7 @@ syscall instead of patching/masking:
   - the syscall trace is exactly [0x2B, 0x3D] (failed NtProtect, then NtDelay)
   - every syscall had RSP ≡ 8 (mod 16) and ABI-shaped arguments
   - NtDelayExecution got Alertable=0 and *Duration = -2500000 (relative 250 ms)
-  - done_flag == 1; the shared clock did NOT advance (the stub never ran)
+  - done_flag == 1; beacon_cycles == 3 (the fallback never enters the loop); the shared clock did NOT advance (the stub never ran)
 """
 
 import struct
@@ -104,7 +104,7 @@ SHARED      = 0x7FFE0000
 SYS_TIME    = SHARED + 0x14
 CLOCK0      = 0                # initial SystemTime (100ns since 1601)
 TICK        = 100000           # 10 ms in 100ns units; one poll step
-TIMEOUT_VAL = 2500000          # the blob's timeout: 250 ms in 100ns units
+TIMEOUT_VAL = 2500000          # the per-cycle timeout: 250 ms in 100ns units
 
 DONE_TAIL = 82                 # done_flag slot, bytes counted from the blob tail
 CYCLES_TAIL = 226              # beacon_cycles slot, bytes from the blob tail

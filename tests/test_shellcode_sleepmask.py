@@ -2,14 +2,16 @@
 """test_shellcode_sleepmask.py — the REAL payload, in the SAC-proof entry mode.
 
 build/sleepmask.bin is the flagship blob (PEB walk -> ntdll exports ->
-NtProtectVirtualMemory RWX -> 12-byte `mov rax,<stub>; jmp rax` mask over
-NtDelayExecution -> masked call polls the KUSER_SHARED_DATA clock ->
-byte-exact restore -> done_flag=1 -> ret). Unlike the PE we ship, the blob is
-fully self-contained PIC: it never references a byte before its own entry (the
-9-byte trampoline is a separate thing), so it can be placed at ANY RWX address
-and entered with a plain `call` — exactly what run-shell.ps1 does once
-VirtualAlloc hands powershell.exe an arbitrary address and
-Marshal.GetDelegateForFunctionPointer turns it into a delegate.
+repeats this cycle three times: NtProtectVirtualMemory(RWX) -> install the
+12-byte `mov rax,<stub>; jmp rax` mask over NtDelayExecution -> masked call
+polls the KUSER_SHARED_DATA clock for 250 ms -> restore the original 12 bytes
+byte-exact -> NtProtectVirtualMemory(restore). After the third cycle it sets
+done_flag and rets. Unlike the PE we ship, the blob is fully self-contained
+PIC: it never references a byte before its own entry (the 9-byte trampoline is
+a separate thing), so it can be placed at ANY RWX address and entered with a
+plain `call` — exactly what run-shell.ps1 does once VirtualAlloc hands
+powershell.exe an arbitrary address and Marshal.GetDelegateForFunctionPointer
+turns it into a delegate.
 
 This test proves the real malware (not just the beacon) "runs no matter what":
 at each of four arbitrary RWX addresses it is `call`ed in the ABI delegate
@@ -18,11 +20,11 @@ syscall numbers and decoy numbers (proving they are read from the export
 prologues at runtime, not hard-coded):
 
   - resolve ntdll via the PEB walk and all three exports BY NAME,
-  - NtProtectVirtualMemory the 12 NtDelayExecution bytes (RWX, then restore) —
-    and NO other syscall (the masked call never reaches a syscall),
+  - NtProtectVirtualMemory the 12 NtDelayExecution bytes (RWX, then restore)
+    three times — and NO other syscall (the masked calls never reach a syscall),
   - be observed writing the mask 48 B8 <8-byte ptr into the blob> FF E0,
-  - poll the KUSER_SHARED_DATA clock ([0x7FFE0014]) past the 250 ms timeout
-    inside the mask,
+  - in each cycle, poll the KUSER_SHARED_DATA clock ([0x7FFE0014]) past the
+    250 ms timeout inside the mask, for a total of 3 x 250 ms,
   - restore the original 12 bytes byte-exactly,
   - set done_flag, return to the return slot, R15 (sentinel) preserved.
 
@@ -248,7 +250,7 @@ def main() -> int:
         return 1
     print("PASS (shellcode: the REAL sleepmask payload `call`ed at 4 arbitrary "
           "RWX addresses x real + decoy nr -> PEB-walk resolve, RWX mask over "
-          "NtDelayExecution observed in flight, 250 ms shared-clock poll, "
+          "NtDelayExecution observed in flight, 3 x 250 ms shared-clock polls, "
           "byte-exact restore, done_flag=1, clean return; R15 preserved)")
     return 0
 
