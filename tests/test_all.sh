@@ -18,6 +18,8 @@
 #   9. macos           Mach-O: static fields + independent walk + run at base + slide
 #   10. macos-coupled  append_macho.py onto a host Mach-O; run in Unicorn (base + slide)
 #   11. harness        the raw windows blob in Unicorn (PEB walk, masked syscalls)
+#   12. harness-fb     same blob, kernel FAILS NtProtect -> direct NtDelayExecution
+#                      fallback (Alertable=0, relative -250ms, stub never runs)
 #
 # Run from anywhere:  bash tests/test_all.sh
 # Exits 0 only if every layer passes.
@@ -82,6 +84,10 @@ run_step "macos-coupled (append_macho + unicorn, base + slide)" \
 # --- 11. raw blob harness ----------------------------------------------------
 run_step "harness (raw blob, PEB walk)" \
   ${PY} tests/run_harness.py
+
+# --- 12. raw blob harness, fallback path -------------------------------------
+run_step "harness-fb (raw blob, NtProtect fails -> direct NtDelayExecution)" \
+  ${PY} tests/run_harness.py --fail-protect
 
 # --- summary ------------------------------------------------------------------
 echo

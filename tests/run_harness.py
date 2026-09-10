@@ -29,7 +29,7 @@ establishes the 16-byte RSP alignment itself before each `syscall`
 (`mov r13, rsp; and rsp, -16`), so any caller frame the loader/injector leaves
 it on is fine. Every one of the four entries must pass.
 
-PASS criteria:
+PASS criteria (default, --fail-protect off):
   - the shellcode returns (RIP reaches RET_ADDR)
   - the syscall trace is exactly [0x2B, 0x2B] (two NtProtect, no 0x3D)
   - every syscall had RSP ≡ 8 (mod 16) and ABI-shaped arguments
@@ -37,6 +37,15 @@ PASS criteria:
   - done_flag (data slot 82 bytes from the blob tail) == 1
   - the original 12 bytes of NtDelayExecution are restored
   - the shared clock advanced past the 250 ms timeout (the mask slept)
+
+PASS criteria (--fail-protect): the kernel fails NtProtectVirtualMemory
+(STATUS_INVALID_HANDLE), so the blob must fall back to a direct NtDelayExecution
+syscall instead of patching/masking:
+  - the shellcode returns (RIP reaches RET_ADDR)
+  - the syscall trace is exactly [0x2B, 0x3D] (failed NtProtect, then NtDelay)
+  - every syscall had RSP ≡ 8 (mod 16) and ABI-shaped arguments
+  - NtDelayExecution got Alertable=0 and *Duration = -2500000 (relative 250 ms)
+  - done_flag == 1; the shared clock did NOT advance (the stub never ran)
 """
 
 import struct
@@ -59,9 +68,13 @@ from unicorn.x86_const import (
 )
 
 ROOT = Path(__file__).resolve().parent.parent
-# usage: run_harness.py [blob.bin]  (default: build/sleepmask.bin)
-BLOB_PATH = (Path(sys.argv[1]) if len(sys.argv) > 1
+# usage: run_harness.py [--fail-protect] [blob.bin]  (default: build/sleepmask.bin)
+_ARGS = [a for a in sys.argv[1:] if not a.startswith("--")]
+BLOB_PATH = (Path(_ARGS[0]) if _ARGS
              else ROOT / "build" / "sleepmask.bin")
+# --fail-protect: the emulated kernel fails NtProtectVirtualMemory, forcing the
+# blob down its direct-NtDelayExecution fallback so that path is exercised too.
+FAIL_PROTECT = "--fail-protect" in sys.argv[1:]
 
 
 def load_blob() -> bytes:
@@ -183,8 +196,13 @@ def build_env(uc, blob: bytes, rsp0: int):
     w(rsp0, _q(RET_ADDR))
 
 
-def run_case(rsp0: int, blob: bytes, done_offset: int):
-    """Run the blob with the given entry RSP. Returns (ok, report_lines)."""
+def run_case(rsp0: int, blob: bytes, done_offset: int, fail_protect: bool = False):
+    """Run the blob with the given entry RSP. Returns (ok, report_lines).
+
+    fail_protect=True makes the emulated kernel fail the NtProtectVirtualMemory
+    call (STATUS_INVALID_HANDLE), forcing the blob down its direct-
+    NtDelayExecution fallback so that path is exercised too.
+    """
     uc = Uc(UC_ARCH_X86, UC_MODE_64)
     uc.mem_map(0x0, 0x100000)
     uc.mem_map(NTDLL_BASE, 0x100000)
@@ -199,6 +217,7 @@ def run_case(rsp0: int, blob: bytes, done_offset: int):
     trace = []            # syscall nr per 0F 05, in order
     abi_fail = []         # human-readable ABI violations
     prot_calls = []       # the NewProtect arg (arg3/R9) of each NtProtect call
+    delay_arg = None      # *Duration value the fallback NtDelayExecution received
     kern = {"prot": 0x20} # the kernel's current protection of the NtDelay text
                         # (0x20 = PAGE_EXECUTE_READ: what ntdll ships its text as)
 
@@ -206,6 +225,7 @@ def run_case(rsp0: int, blob: bytes, done_offset: int):
         return SC_BASE <= addr < SC_BASE + len(blob)
 
     def on_code(uc_, rip, size, _):
+        nonlocal delay_arg
         if bytes(uc_.mem_read(rip, 2)) != b"\x0F\x05":
             return
         # It's a `syscall`. Read the args exactly as nt!KiSystemCall64 does for a
@@ -227,21 +247,35 @@ def run_case(rsp0: int, blob: bytes, done_offset: int):
 
         if nr == 0x2B:
             # NtProtectVirtualMemory(hProc, *Base, *Size, NewProtect, *OldProtect)
-            if r10 != 0:
-                abi_fail.append(f"0x2B arg0(R10)=0x{r10:X} != NULL (current process)")
+            if r10 != 0xFFFFFFFFFFFFFFFF:
+                abi_fail.append(
+                    f"0x2B arg0(R10)=0x{r10:X} != -1 (current-process pseudo-handle)"
+                )
             for tag, v in (("arg1(RDX)=", rdx), ("arg2(R8)=", r8), ("arg4=[rsp+0x28]", arg4)):
                 if not in_blob(v):
                     abi_fail.append(f"0x2B {tag}0x{v:X} is not a blob data pointer")
-            # Emulate the kernel: hand back the current protection as *OldProtect,
-            # then apply NewProtect (arg3/R9) to the region.
-            uc_.mem_write(arg4, struct.pack("<Q", kern["prot"]))
-            kern["prot"] = r9
             prot_calls.append(r9)
-            uc_.reg_write(UC_X86_REG_RAX, 0)     # STATUS_SUCCESS
+            if fail_protect:
+                # The emulated process has no valid object for the handle, so the
+                # protect fails. *OldProtect is not written and the region is left
+                # as it was.
+                uc_.reg_write(UC_X86_REG_RAX, 0xC0000008)   # STATUS_INVALID_HANDLE
+            else:
+                # Emulate the kernel: hand back the current protection as
+                # *OldProtect, then apply NewProtect (arg3/R9) to the region.
+                uc_.mem_write(arg4, struct.pack("<Q", kern["prot"]))
+                kern["prot"] = r9
+                uc_.reg_write(UC_X86_REG_RAX, 0)     # STATUS_SUCCESS
         elif nr == 0x3D:
-            # NtDelayExecution(InState, *Duration) -- only the fallback path.
+            # NtDelayExecution(Alertable, *Duration) -- only the fallback path.
+            # arg0 (Alertable) must be 0; arg1 (*Duration) must point at the
+            # blob's timeout slot (overwritten in place to the relative value).
             if r10 != 0:
-                abi_fail.append(f"0x3D arg0(R10)=0x{r10:X} != 0 (InState=relative)")
+                abi_fail.append(f"0x3D arg0(R10)=0x{r10:X} != 0 (Alertable=0)")
+            if not in_blob(rdx):
+                abi_fail.append(f"0x3D arg1(RDX)=0x{rdx:X} is not a blob data pointer")
+            else:
+                delay_arg = struct.unpack("<q", bytes(uc_.mem_read(rdx, 8)))[0]
             uc_.reg_write(UC_X86_REG_RAX, 0)     # STATUS_SUCCESS
         else:
             abi_fail.append(f"unexpected syscall nr=0x{nr:02X}")
@@ -276,24 +310,17 @@ def run_case(rsp0: int, blob: bytes, done_offset: int):
         f"sys_time:    {clock} (100ns units; timeout {TIMEOUT_VAL} = 250 ms)",
         f"ntdelay[12]: {nt_delay.hex(' ')}",
     ]
+    if fail_protect:
+        lines.append(f"delay arg:   {delay_arg} (100ns; want {-TIMEOUT_VAL} = relative 250 ms)")
 
     ok = True
     if stuck:
         lines.append(f"FAIL: stuck at rip=0x{rip:X} after {len(trace)} syscalls")
         ok = False
-    if trace != [0x2B, 0x2B]:
-        lines.append(f"FAIL: syscalls {[hex(n) for n in trace]} != [0x2B, 0x2B] (want two NtProtect, no 0x3D)")
-        ok = False
     if abi_fail:
         lines.append("FAIL: syscall ABI violations (kernel would not see these args):")
         for f in abi_fail:
             lines.append(f"  {f}")
-        ok = False
-    if prot_calls != [0x40, 0x20]:
-        lines.append(f"FAIL: prot calls {[hex(p) for p in prot_calls]} != [0x40, 0x20] (set RWX then restore original)")
-        ok = False
-    if kern["prot"] != 0x20:
-        lines.append(f"FAIL: final prot 0x{kern['prot']:02X} != 0x20 (original protection not restored)")
         ok = False
     if done != 1:
         lines.append(f"FAIL: done_flag == {done}, expected 1")
@@ -301,9 +328,38 @@ def run_case(rsp0: int, blob: bytes, done_offset: int):
     if nt_delay != expect_nt:
         lines.append("FAIL: NtDelayExecution prologue not restored")
         ok = False
-    if not (TIMEOUT_VAL <= clock <= TIMEOUT_VAL + 2 * TICK):
-        lines.append(f"FAIL: clock {clock} did not poll past the {TIMEOUT_VAL} timeout")
-        ok = False
+    if fail_protect:
+        # Fallback: the failed NtProtect must route to a direct NtDelayExecution
+        # with a RELATIVE (negative) duration, and the mask stub must never run
+        # (the shared clock stays at CLOCK0).
+        if trace != [0x2B, 0x3D]:
+            lines.append(f"FAIL: syscalls {[hex(n) for n in trace]} != [0x2B, 0x3D] (want failed NtProtect then NtDelayExecution)")
+            ok = False
+        if prot_calls != [0x40]:
+            lines.append(f"FAIL: prot calls {[hex(p) for p in prot_calls]} != [0x40] (one RWX attempt, never restored)")
+            ok = False
+        if kern["prot"] != 0x20:
+            lines.append(f"FAIL: final prot 0x{kern['prot']:02X} != 0x20 (region protection should be untouched)")
+            ok = False
+        if delay_arg != -TIMEOUT_VAL:
+            lines.append(f"FAIL: delay arg {delay_arg} != {-TIMEOUT_VAL} (want relative -{TIMEOUT_VAL}, 100ns)")
+            ok = False
+        if clock != CLOCK0:
+            lines.append(f"FAIL: clock {clock} advanced; the mask stub ran on the fallback path (want {CLOCK0})")
+            ok = False
+    else:
+        if trace != [0x2B, 0x2B]:
+            lines.append(f"FAIL: syscalls {[hex(n) for n in trace]} != [0x2B, 0x2B] (want two NtProtect, no 0x3D)")
+            ok = False
+        if prot_calls != [0x40, 0x20]:
+            lines.append(f"FAIL: prot calls {[hex(p) for p in prot_calls]} != [0x40, 0x20] (set RWX then restore original)")
+            ok = False
+        if kern["prot"] != 0x20:
+            lines.append(f"FAIL: final prot 0x{kern['prot']:02X} != 0x20 (original protection not restored)")
+            ok = False
+        if not (TIMEOUT_VAL <= clock <= TIMEOUT_VAL + 2 * TICK):
+            lines.append(f"FAIL: clock {clock} did not poll past the {TIMEOUT_VAL} timeout")
+            ok = False
     if ok:
         lines.append("PASS")
     return ok, lines
@@ -313,10 +369,11 @@ def main():
     blob = load_blob()
     done_offset = len(blob) - DONE_TAIL   # done_flag slot, from the blob tail
     print(f"blob size:   {len(blob)} bytes")
+    print(f"mode:        {'fail-protect (fallback NtDelayExecution)' if FAIL_PROTECT else 'main (masked NtProtect)'}")
 
     all_ok = True
     for rsp0 in ENTRIES:
-        ok, lines = run_case(rsp0, blob, done_offset)
+        ok, lines = run_case(rsp0, blob, done_offset, fail_protect=FAIL_PROTECT)
         print(f"--- entry RSP0=0x{rsp0:05X} (rsp % 16 = {rsp0 % 16}) ---")
         for line in lines:
             print(line)

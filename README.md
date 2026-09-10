@@ -154,7 +154,7 @@ bash tests/test_all.sh   # the 11-layer matrix, one command
   PASS  macos-coupled (append_macho + unicorn, base + slide)
   PASS  harness (raw blob, PEB walk)
 ------------------------------------------------------------------
-ALL 11 LAYERS GREEN
+ALL 12 LAYERS GREEN
 ```
 
 Layer notes:
