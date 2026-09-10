@@ -82,7 +82,7 @@ HOST_MSG   = b"host alive\n"
 # The exact on-disk artifact the beacon must leave (the "runs no matter what"
 # receipt). The create-hook decodes this from the live ObjectAttributes, so a
 # typo in the beacon's path string is a failure.
-ARTIFACT_NAME = "sleepmask_beacon.txt"
+ARTIFACT_NAME = "\\sleepmask_beacon.txt"
 
 # fixture syscall numbers (all distinct; the beacon reads them at runtime):
 #   NtWriteFile / NtCreateFile / NtClose / NtTerminateProcess
@@ -273,7 +273,7 @@ def read_file_name(uc_, oa_ptr):
 
 
 def run_coupled(uc, nr_write, nr_create, nr_close, nr_term):
-    """Enter the loaded image at its entry; return (writes, exit_code, r15, created)."""
+    """Enter the loaded image; return writes, exit_code, r15, and (name, status) created entries."""
     writes = []
     exit_code = [None]
     created = []
@@ -309,12 +309,23 @@ def run_coupled(uc, nr_write, nr_create, nr_close, nr_term):
             uc_.reg_write(UC_X86_REG_RAX, 0)
             uc_.reg_write(UC_X86_REG_RIP, rip + 2)
         elif nr == nr_create:
-            # NtCreateFile(fh_out=&fh_out, ...): stash a fake handle at [rcx],
-            # and decode the target path from r8's ObjectAttributes.
+            # NtCreateFile(fh_out=&fh_out, ...): emulate the kernel's
+            # validation, stash a fake handle at [rcx] on success, and
+            # decode the target path from r8's ObjectAttributes.
             oa = uc_.reg_read(UC_X86_REG_R8)
-            created.append(read_file_name(uc_, oa))
-            uc_.mem_write(rcx, struct.pack("<Q", FILE_HDL))
-            uc_.reg_write(UC_X86_REG_RAX, 0)
+            name = read_file_name(uc_, oa)
+            disp = struct.unpack("<Q", bytes(uc_.mem_read(rsp + 0x40, 8)))[0]
+            extra = struct.unpack("<Q", bytes(uc_.mem_read(rsp + 0x60, 8)))[0]
+            status = 0
+            if name is None or not name.startswith("\\"):
+                status = 0xC0000050          # STATUS_OBJECT_NAME_SYNTAX_ERROR
+            elif extra != 0:
+                status = 0xC0000225          # STATUS_INVALID_PARAMETER
+            elif disp == 0:
+                status = 0xC0000034          # STATUS_OBJECT_NAME_NOT_FOUND
+            created.append((name, status))
+            uc_.mem_write(rcx, struct.pack("<Q", FILE_HDL if status == 0 else 0))
+            uc_.reg_write(UC_X86_REG_RAX, status)
             uc_.reg_write(UC_X86_REG_RIP, rip + 2)
         elif nr == nr_close:
             uc_.reg_write(UC_X86_REG_RAX, 0)
@@ -345,8 +356,8 @@ def run_coupled(uc, nr_write, nr_create, nr_close, nr_term):
 def dynamic_check(writes, exit_code, r15, created, abi_violations, label):
     p = []
     # The beacon's NtCreateFile must target the exact artifact name.
-    if created != [ARTIFACT_NAME]:
-        p.append(f"[{label}] artifact filename wrong: {created!r} != [{ARTIFACT_NAME!r}]")
+    if len(created) != 1 or created[0][0] != ARTIFACT_NAME or created[0][1] != 0:
+        p.append(f"[{label}] artifact create wrong: {created!r} != [({ARTIFACT_NAME!r}, 0)]")
     # beacon fires twice (stdout + the file artifact), then the host writes.
     if len(writes) != 3:
         p.append(f"[{label}] expected 3 writes (beacon->stdout, beacon->file, host), got {len(writes)}")

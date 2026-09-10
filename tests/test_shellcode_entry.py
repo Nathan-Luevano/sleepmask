@@ -113,6 +113,8 @@ def run_shell(base, off, nr_write, nr_create, nr_close, nr_term, beacon: bytes) 
         p.append(f"expected 1 NtCreateFile, got {len(creates)}")
     elif creates[0][1] != td.ARTIFACT_NAME:
         p.append(f"artifact filename wrong: {creates[0][1]!r} != {td.ARTIFACT_NAME!r}")
+    elif creates[0][2] != 0:
+        p.append(f"artifact create failed: 0x{creates[0][2]:08X}")
     if len(closes) != 1:
         p.append(f"expected 1 NtClose, got {len(closes)}")
     if r15 != td.SENTINEL_R15:

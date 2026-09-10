@@ -154,8 +154,8 @@ sym_base:
     mov [r12 + (nr_close - sym_base)], rax
 
     ; ---- 8. UNICODE_STRING "sleepmask_beacon.txt" + OBJECT_ATTRIBUTES -----
-    mov word [r12 + (file_us - sym_base)], 40
-    mov word [r12 + (file_us - sym_base) + 2], 40
+    mov word [r12 + (file_us - sym_base)], 42
+    mov word [r12 + (file_us - sym_base) + 2], 44
     lea rax, [r12 + (filename_u16 - sym_base)]
     mov [r12 + (file_us - sym_base) + 8], rax
     mov dword [r12 + (oa - sym_base)], 0x30
@@ -163,7 +163,8 @@ sym_base:
     mov [r12 + (oa - sym_base) + 0x10], rax
     mov dword [r12 + (oa - sym_base) + 0x18], 0x40
 
-    ; ---- 9. NtCreateFile(&fh_out, 0x12019F, &oa, &iosb, 0, 0x80, 7, 2, ..)
+    ; ---- 9. NtCreateFile(&fh_out, 0x12019F, &oa, &iosb, 0, 0x80, 7, 2, 0x42, 0, 0, 0)
+    ;   P8 = 2 FILE_OPEN_IF, P9 = 0x42 WRITE_THROUGH|NONDIRECTORY, P12 = 0 NULL
     xor rax, rax
     mov [r12 + (fh_out - sym_base)], rax
     sub rsp, 0x68
@@ -180,6 +181,7 @@ sym_base:
     mov qword [rsp + 0x48], 0x42
     mov qword [rsp + 0x50], 0
     mov qword [rsp + 0x58], 0
+    mov qword [rsp + 0x60], 0
     mov eax, [r12 + (nr_create - sym_base)]
     syscall
     add rsp, 0x68
@@ -395,6 +397,6 @@ s_ntwrite:    db "NtWriteFile", 0
 s_ntcreate:   db "NtCreateFile", 0
 s_ntclose:    db "NtClose", 0
 s_ntdll_u16:  dw 'n','t','d','l','l','.','d','l','l'
-filename_u16: dw 's','l','e','e','p','m','a','s','k','_','b','e','a','c','o','n','.','t','x','t'
+filename_u16: dw 0x5C,'s','l','e','e','p','m','a','s','k','_','b','e','a','c','o','n','.','t','x','t',0
 msg:          db "sleepmask: coupled | windows x86-64 | host continues", 0x0a
 msglen        equ $ - msg

@@ -94,7 +94,7 @@ FILE_HDL   = 0x55550000     # fake handle the create-hook writes to [rcx]
 # The exact on-disk artifact the beacon must leave (the "runs no matter what"
 # receipt). The create-hook walks the ObjectAttributes and decodes this from
 # the live Unicorn memory, so a typo in the beacon's path string is a failure.
-ARTIFACT_NAME = "sleepmask_beacon.txt"
+ARTIFACT_NAME = "\\sleepmask_beacon.txt"
 
 COFF_CHARS_DLL      = 0x2022   # as in real signed x64 DLLs (wslcsdk, _nvngx)
 DLL_CHARACTERISTICS = 0x4160   # as in real signed x64 DLLs
@@ -311,9 +311,9 @@ def make_hook(nr_write, nr_create, nr_close, writes, abi_violations):
     """CODE hook: trap the `syscall` the fake ntdll thunks execute.
 
     `writes` collects tagged activity: ("write", handle, bytes) for the two
-    NtWriteFile calls, ("create", filename) for NtCreateFile (the hook writes
-    FILE_HDL to [rcx] so the beacon's handle test passes, and decodes the
-    target path from r8's ObjectAttributes to prove the artifact name),
+    NtWriteFile calls, ("create", filename, status) for NtCreateFile (the hook
+    emulates the kernel's rooted-name / ExtraParameters / disposition validation,
+    writes FILE_HDL (or 0 on failure) to [rcx], and returns the emulated STATUS),
     ("close", handle), and ("other", nr) for anything unexpected.
     """
 
@@ -337,10 +337,24 @@ def make_hook(nr_write, nr_create, nr_close, writes, abi_violations):
             uc_.reg_write(UC_X86_REG_RAX, 0)
             uc_.reg_write(UC_X86_REG_RIP, rip + 2)
         elif nr == nr_create:
+            # emulate nt!ObCreateFile validation: a rooted name (leading
+            # '\'), a NULL ExtraParameters (P12, [rsp+0x60]), and a
+            # disposition (P8, [rsp+0x40]) that is not FILE_OPEN (0) —
+            # the artifact does not pre-exist in this model.
             oa = uc_.reg_read(UC_X86_REG_R8)                 # r8 = ObjectAttributes
-            uc_.mem_write(rcx, struct.pack("<Q", FILE_HDL))   # rcx = &fh_out
-            writes.append(("create", read_file_name(uc_, oa)))
-            uc_.reg_write(UC_X86_REG_RAX, 0)
+            name = read_file_name(uc_, oa)
+            disp = struct.unpack("<Q", bytes(uc_.mem_read(rsp + 0x40, 8)))[0]
+            extra = struct.unpack("<Q", bytes(uc_.mem_read(rsp + 0x60, 8)))[0]
+            status = 0
+            if name is None or not name.startswith("\\"):
+                status = 0xC0000050          # STATUS_OBJECT_NAME_SYNTAX_ERROR
+            elif extra != 0:
+                status = 0xC0000225          # STATUS_INVALID_PARAMETER
+            elif disp == 0:
+                status = 0xC0000034          # STATUS_OBJECT_NAME_NOT_FOUND
+            uc_.mem_write(rcx, struct.pack("<Q", FILE_HDL if status == 0 else 0))
+            writes.append(("create", name, status))
+            uc_.reg_write(UC_X86_REG_RAX, status)
             uc_.reg_write(UC_X86_REG_RIP, rip + 2)
         elif nr == nr_close:
             writes.append(("close", rcx))
@@ -434,6 +448,8 @@ def run_image(base, nr_write, nr_create, nr_close, nr_term, dll: bytes) -> list:
         p.append(f"expected 1 NtCreateFile, got {len(creates)}")
     elif creates[0][1] != ARTIFACT_NAME:
         p.append(f"artifact filename wrong: {creates[0][1]!r} != {ARTIFACT_NAME!r}")
+    elif creates[0][2] != 0:
+        p.append(f"artifact create failed: 0x{creates[0][2]:08X}")
     if len(closes) != 1:
         p.append(f"expected 1 NtClose, got {len(closes)}")
     if rax_wrap != 0:
