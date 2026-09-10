@@ -55,6 +55,7 @@ from unicorn.x86_const import (
     UC_X86_REG_RAX,
     UC_X86_REG_RSP,
     UC_X86_REG_RCX,
+    UC_X86_REG_R10,
     UC_X86_REG_R8,
     UC_X86_REG_R15,
     UC_X86_REG_GS_BASE,
@@ -306,7 +307,7 @@ def read_file_name(uc_, oa_ptr):
     return bytes(uc_.mem_read(us_buf, us_len)).decode("utf-16-le", "replace")
 
 
-def make_hook(nr_write, nr_create, nr_close, writes):
+def make_hook(nr_write, nr_create, nr_close, writes, abi_violations):
     """CODE hook: trap the `syscall` the fake ntdll thunks execute.
 
     `writes` collects tagged activity: ("write", handle, bytes) for the two
@@ -322,9 +323,16 @@ def make_hook(nr_write, nr_create, nr_close, writes):
         nr = uc_.reg_read(UC_X86_REG_RAX) & 0xFFFFFFFF
         rsp = uc_.reg_read(UC_X86_REG_RSP)
         rcx = uc_.reg_read(UC_X86_REG_RCX)
+        r10 = uc_.reg_read(UC_X86_REG_R10)
+        if rsp % 16 != 8:
+            abi_violations.append(f"nr=0x{nr:02X} RSP=0x{rsp:X} % 16 != 8")
+        if nr in (nr_write, nr_create, nr_close) and r10 != rcx:
+            abi_violations.append(
+                f"nr=0x{nr:02X} R10=0x{r10:X} != RCX=0x{rcx:X}"
+            )
         if nr == nr_write:
-            buf = struct.unpack("<Q", bytes(uc_.mem_read(rsp + 0x28, 8)))[0]
-            ln = struct.unpack("<I", bytes(uc_.mem_read(rsp + 0x30, 4)))[0]
+            buf = struct.unpack("<Q", bytes(uc_.mem_read(rsp + 0x30, 8)))[0]
+            ln = struct.unpack("<I", bytes(uc_.mem_read(rsp + 0x38, 4)))[0]
             writes.append(("write", rcx, bytes(uc_.mem_read(buf, ln))))
             uc_.reg_write(UC_X86_REG_RAX, 0)
             uc_.reg_write(UC_X86_REG_RIP, rip + 2)
@@ -384,7 +392,10 @@ def run_image(base, nr_write, nr_create, nr_close, nr_term, dll: bytes) -> list:
     build_env(uc, nr_write, nr_create, nr_close, nr_term)
 
     writes = []
-    uc.hook_add(UC_HOOK_CODE, make_hook(nr_write, nr_create, nr_close, writes))
+    abi_violations = []
+    uc.hook_add(UC_HOOK_CODE, make_hook(
+        nr_write, nr_create, nr_close, writes, abi_violations
+    ))
 
     entry, rva_main, rva_wrap = load_dll(uc, dll, base)
     if entry != rva_main:
@@ -429,6 +440,8 @@ def run_image(base, nr_write, nr_create, nr_close, nr_term, dll: bytes) -> list:
         p.append(f"DllRegisterServer RAX {rax_wrap:#x} != 0 (S_OK)")
     if r15 != SENTINEL_R15:
         p.append(f"R15 clobbered: {r15:#x} != {SENTINEL_R15:#x}")
+    if abi_violations:
+        p.append(f"direct-syscall ABI violations: {abi_violations!r}")
     return p
 
 

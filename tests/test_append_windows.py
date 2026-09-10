@@ -50,6 +50,7 @@ from unicorn.x86_const import (
     UC_X86_REG_RAX,
     UC_X86_REG_RSP,
     UC_X86_REG_RCX,
+    UC_X86_REG_R10,
     UC_X86_REG_RDX,
     UC_X86_REG_R8,
     UC_X86_REG_R15,
@@ -276,6 +277,8 @@ def run_coupled(uc, nr_write, nr_create, nr_close, nr_term):
     writes = []
     exit_code = [None]
     created = []
+    abi_violations = []
+    beacon_syscalls = [nr_write, nr_create, nr_write, nr_close]
 
     def on_code(uc_, rip, size, _):
         if bytes(uc_.mem_read(rip, 2)) != b"\x0F\x05":
@@ -283,10 +286,25 @@ def run_coupled(uc, nr_write, nr_create, nr_close, nr_term):
         nr = uc_.reg_read(UC_X86_REG_RAX) & 0xFFFFFFFF
         rsp = uc_.reg_read(UC_X86_REG_RSP)
         rcx = uc_.reg_read(UC_X86_REG_RCX)
+        r10 = uc_.reg_read(UC_X86_REG_R10)
         rdx = uc_.reg_read(UC_X86_REG_RDX)
+        in_beacon = bool(beacon_syscalls)
+        if in_beacon:
+            expected = beacon_syscalls.pop(0)
+            if nr != expected:
+                abi_violations.append(
+                    f"beacon syscall nr=0x{nr:02X}, expected 0x{expected:02X}"
+                )
+            if rsp % 16 != 8:
+                abi_violations.append(f"nr=0x{nr:02X} RSP=0x{rsp:X} % 16 != 8")
+            if r10 != rcx:
+                abi_violations.append(
+                    f"nr=0x{nr:02X} R10=0x{r10:X} != RCX=0x{rcx:X}"
+                )
         if nr == nr_write:
-            buf = struct.unpack("<Q", bytes(uc_.mem_read(rsp + 0x28, 8)))[0]
-            ln = struct.unpack("<I", bytes(uc_.mem_read(rsp + 0x30, 4)))[0]
+            arg_base = 0x30 if in_beacon else 0x28
+            buf = struct.unpack("<Q", bytes(uc_.mem_read(rsp + arg_base, 8)))[0]
+            ln = struct.unpack("<I", bytes(uc_.mem_read(rsp + arg_base + 8, 4)))[0]
             writes.append((rcx, bytes(uc_.mem_read(buf, ln))))
             uc_.reg_write(UC_X86_REG_RAX, 0)
             uc_.reg_write(UC_X86_REG_RIP, rip + 2)
@@ -321,10 +339,10 @@ def run_coupled(uc, nr_write, nr_create, nr_close, nr_term):
     # stop emulation after zero instructions.)
     start = IMAGE_BASE + entry
     uc.emu_start(start, start + 1, count=5_000_000)
-    return writes, exit_code[0], uc.reg_read(UC_X86_REG_R15), created
+    return writes, exit_code[0], uc.reg_read(UC_X86_REG_R15), created, abi_violations
 
 
-def dynamic_check(writes, exit_code, r15, created, label):
+def dynamic_check(writes, exit_code, r15, created, abi_violations, label):
     p = []
     # The beacon's NtCreateFile must target the exact artifact name.
     if created != [ARTIFACT_NAME]:
@@ -346,6 +364,8 @@ def dynamic_check(writes, exit_code, r15, created, label):
         p.append(f"[{label}] host exit code {exit_code} != 42")
     if r15 != SENTINEL_R15:
         p.append(f"[{label}] R15 clobbered: {r15:#x} != {SENTINEL_R15:#x}")
+    if abi_violations:
+        p.append(f"[{label}] direct-syscall ABI violations: {abi_violations!r}")
     return p
 
 
@@ -393,11 +413,15 @@ def main() -> int:
         uc.mem_map(STACK, 0x20000)
         uc.mem_map(IMAGE_BASE, 0x10000)
         build_env(uc, nw, nc, ncl, nt)
-        writes, exit_code, r15, created = run_coupled(uc, nw, nc, ncl, nt)
+        writes, exit_code, r15, created, abi_violations = run_coupled(
+            uc, nw, nc, ncl, nt
+        )
         print(f"[{label}] writes={[w[1].decode(errors='replace') for w in writes]}"
               f" created={created!r} exit={exit_code} "
               f"r15={'ok' if r15 == SENTINEL_R15 else 'X'}")
-        all_problems += dynamic_check(writes, exit_code, r15, created, label)
+        all_problems += dynamic_check(
+            writes, exit_code, r15, created, abi_violations, label
+        )
 
     for pr in all_problems:
         print(f"RUN FAIL: {pr}")

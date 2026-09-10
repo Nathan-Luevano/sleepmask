@@ -18,7 +18,7 @@ KUSER_SHARED_DATA SystemTime qword advances it by TICK (10 ms) on every
 CPU polling a live clock would.
 
 The CODE hook traps 0F 05 and emulates the kernel side of the syscall ABI:
-it checks RSP 16-alignment, reads the args the way nt!KiSystemCall64 does
+it checks RSP ≡ 8 (mod 16), reads the args the way nt!KiSystemCall64 does
 (arg0 = R10, arg1 = RDX, arg2 = R8, arg3 = R9, arg4 = [RSP+0x28]), validates
 them against the blob, writes the NtProtectVirtualMemory OldProtect out-param,
 zeroes RAX (STATUS_SUCCESS) and steps RIP past the instruction.
@@ -32,9 +32,9 @@ it on is fine. Every one of the four entries must pass.
 PASS criteria:
   - the shellcode returns (RIP reaches RET_ADDR)
   - the syscall trace is exactly [0x2B, 0x2B] (two NtProtect, no 0x3D)
-  - every syscall had RSP 16-byte aligned and ABI-shaped arguments
+  - every syscall had RSP ≡ 8 (mod 16) and ABI-shaped arguments
   - the NtProtect calls set RWX then restore the original protection
-  - done_flag (data slot 66 bytes from the blob tail) == 1
+  - done_flag (data slot 82 bytes from the blob tail) == 1
   - the original 12 bytes of NtDelayExecution are restored
   - the shared clock advanced past the 250 ms timeout (the mask slept)
 """
@@ -82,7 +82,7 @@ STACK      = 0x0600000
 RSP0       = 0x0610008
 # Entry RSP classes to prove the blob is caller-independent: the ≡ 8 class a
 # `call` gives, plus jump/injector frames the blob cannot assume. All four must
-# produce RSP ≡ 0 at every `syscall`.
+# produce RSP ≡ 8 (mod 16) at every `syscall`.
 ENTRIES    = (0x0610000, 0x0610004, RSP0, 0x061000C)
 
 # KUSER_SHARED_DATA is mapped at 0x7FFE0000 on every x64 Windows; SystemTime
@@ -93,7 +93,7 @@ CLOCK0      = 0                # initial SystemTime (100ns since 1601)
 TICK        = 100000           # 10 ms in 100ns units; one poll step
 TIMEOUT_VAL = 2500000          # the blob's timeout: 250 ms in 100ns units
 
-DONE_TAIL = 66                 # done_flag slot, bytes counted from the blob tail
+DONE_TAIL = 82                 # done_flag slot, bytes counted from the blob tail
 
 EXPORTS = [                     # (name, thunk RVA inside the PE)
     (b"NtDelayExecution\0",      0x1000),
@@ -210,7 +210,7 @@ def run_case(rsp0: int, blob: bytes, done_offset: int):
             return
         # It's a `syscall`. Read the args exactly as nt!KiSystemCall64 does for a
         # direct x64 Windows syscall: arg0=R10, arg1=RDX, arg2=R8, arg3=R9,
-        # arg4=[RSP+0x28]; and RSP must be 16-byte aligned.
+        # arg4=[RSP+0x28]; and RSP must be ≡ 8 (mod 16).
         rsp  = uc_.reg_read(UC_X86_REG_RSP)
         nr   = uc_.reg_read(UC_X86_REG_RAX) & 0xFFFFFFFF
         r10  = uc_.reg_read(UC_X86_REG_R10)
@@ -220,8 +220,10 @@ def run_case(rsp0: int, blob: bytes, done_offset: int):
         arg4 = struct.unpack("<Q", bytes(uc_.mem_read(rsp + 0x28, 8)))[0]
         trace.append(nr)
 
-        if rsp % 16 != 0:
-            abi_fail.append(f"nr=0x{nr:02X} RSP=0x{rsp:X} not 16-byte aligned")
+        if rsp % 16 != 8:
+            abi_fail.append(
+                f"nr=0x{nr:02X} RSP=0x{rsp:X} % 16 != 8 (direct-syscall ABI)"
+            )
 
         if nr == 0x2B:
             # NtProtectVirtualMemory(hProc, *Base, *Size, NewProtect, *OldProtect)

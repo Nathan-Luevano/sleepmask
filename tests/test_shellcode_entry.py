@@ -76,12 +76,15 @@ def run_shell(base, off, nr_write, nr_create, nr_close, nr_term, beacon: bytes) 
     uc.mem_write(shell_addr, beacon)
 
     writes = []
-    uc.hook_add(UC_HOOK_CODE, td.make_hook(nr_write, nr_create, nr_close, writes))
+    abi_violations = []
+    uc.hook_add(UC_HOOK_CODE, td.make_hook(
+        nr_write, nr_create, nr_close, writes, abi_violations
+    ))
 
     uc.reg_write(UC_X86_REG_R15, td.SENTINEL_R15)
     uc.reg_write(UC_X86_REG_RAX, td.JUNK_RAX)
     ret_addr = td.STACK + 0x8000
-    rsp = td.STACK + 0x100
+    rsp = td.STACK + 0x108
     uc.mem_write(rsp, struct.pack("<Q", ret_addr))   # the `call`'s return slot
     uc.reg_write(UC_X86_REG_RSP, rsp)
     uc.reg_write(UC_X86_REG_RIP, shell_addr)
@@ -114,6 +117,8 @@ def run_shell(base, off, nr_write, nr_create, nr_close, nr_term, beacon: bytes) 
         p.append(f"expected 1 NtClose, got {len(closes)}")
     if r15 != td.SENTINEL_R15:
         p.append(f"R15 clobbered: {r15:#x} != {td.SENTINEL_R15:#x}")
+    if abi_violations:
+        p.append(f"direct-syscall ABI violations: {abi_violations!r}")
     return p
 
 

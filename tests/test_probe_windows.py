@@ -31,6 +31,7 @@ from unicorn.x86_const import (
     UC_X86_REG_RIP,
     UC_X86_REG_RAX,
     UC_X86_REG_RCX,
+    UC_X86_REG_R10,
     UC_X86_REG_RSP,
     UC_X86_REG_GS_BASE,
 )
@@ -110,14 +111,20 @@ def make_hook(uc, results):
             return
         nr = uc_.reg_read(UC_X86_REG_RAX) & 0xFFFFFFFF
         rsp = uc_.reg_read(UC_X86_REG_RSP)
+        rcx = uc_.reg_read(UC_X86_REG_RCX)
+        r10 = uc_.reg_read(UC_X86_REG_R10)
+        if rsp % 16 != 8:
+            results["abi"].append(rsp % 16)
+        if nr in (NR_WRITE, NR_CREATE, NR_CLOSE, NR_TERM) and r10 != rcx:
+            results["abi"].append(("r10", r10, rcx))
         if nr == NR_TERM:
             results["term"] = uc_.reg_read(UC_X86_REG_RCX)
             uc_.reg_write(UC_X86_REG_RAX, 0)
             uc_.reg_write(UC_X86_REG_RIP, rip + 2)
             uc_.emu_stop()
         elif nr == NR_WRITE:
-            buf = struct.unpack_from("<Q", uc_.mem_read(rsp + 0x28, 8))[0]
-            ln = struct.unpack_from("<Q", uc_.mem_read(rsp + 0x30, 8))[0]
+            buf = struct.unpack_from("<Q", uc_.mem_read(rsp + 0x30, 8))[0]
+            ln = struct.unpack_from("<Q", uc_.mem_read(rsp + 0x38, 8))[0]
             h = uc_.reg_read(UC_X86_REG_RCX)
             results["writes"].append((h, bytes(uc_.mem_read(buf, ln))))
             uc_.reg_write(UC_X86_REG_RAX, 0)
@@ -148,7 +155,7 @@ def main():
     uc.reg_write(UC_X86_REG_GS_BASE, 0)
     uc.reg_write(UC_X86_REG_RSP, RSP0)
 
-    results = {"writes": [], "term": None, "closed": None, "unknown": []}
+    results = {"writes": [], "term": None, "closed": None, "unknown": [], "abi": []}
     uc.hook_add(UC_HOOK_CODE, make_hook(uc, results))
     uc.emu_start(SC_BASE, 0, count=2_000_000)
 
@@ -174,6 +181,8 @@ def main():
         fail(f"closed = {results['closed']}, expected file handle {FILE_H:#x}")
     if results["unknown"]:
         fail(f"unexpected syscalls: {[hex(n) for n in results['unknown']]}")
+    if results["abi"]:
+        fail(f"direct-syscall ABI violations: {results['abi']!r}")
     if not text.strip():
         fail("no report captured")
     else:
