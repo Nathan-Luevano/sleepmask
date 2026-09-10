@@ -194,14 +194,15 @@ def run_one(base, off, nr_delay, nr_protect, blob: bytes) -> list:
     if restored != original:
         p.append(f"NtDelayExecution not restored: {restored.hex(' ')}")
 
-    if trace != [nr_protect, nr_protect]:
+    if trace != [nr_protect] * 6:
         p.append(f"syscalls {[hex(n) for n in trace]} != "
-                 f"[{nr_protect:#x}, {nr_protect:#x}] (want exactly the two "
-                 f"NtProtects; the masked NtDelayExecution must never syscall)")
+                 f"[{nr_protect:#x}] * 6 (want exactly six NtProtects — "
+                 f"3 cycles x set+restore; the masked NtDelayExecution "
+                 f"must never syscall)")
 
     clock = struct.unpack("<Q", uc.mem_read(H.SYS_TIME, 8))[0]
-    if not (H.TIMEOUT_VAL <= clock <= H.TIMEOUT_VAL + 2 * H.TICK):
-        p.append(f"clock {clock} did not poll past the {H.TIMEOUT_VAL} timeout")
+    if not (3 * H.TIMEOUT_VAL <= clock <= 3 * H.TIMEOUT_VAL + 6 * H.TICK):
+        p.append(f"clock {clock} did not poll past the 3x{H.TIMEOUT_VAL} timeout (3 beacon cycles)")
 
     # the mask itself, observed in flight:
     byte_writes = {off_: val & 0xFF for off_, sz, val in mask_writes if sz == 1}

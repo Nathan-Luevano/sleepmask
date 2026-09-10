@@ -24,7 +24,7 @@ ways:
      final `ret` lands in the trampoline's spin loop — where emulation
      stops and the assertions run:
 
-       - syscall trace == [0x2B, 0x2B] (two NtProtect, masked 0x3D absent)
+       - syscall trace == [0x2B]*6 (six NtProtect: 3 cycles x set+restore, masked 0x3D absent)
        - done_flag == 1 in the PE image's OWN copy of the blob
        - NtDelayExecution's 12 original bytes restored
        - the KUSER_SHARED_DATA clock advanced past the 250 ms timeout
@@ -149,8 +149,8 @@ def dynamic_check(uc: Uc, blob: bytes) -> list:
         p.append(f"NtDelayExecution not restored: {nt_delay.hex()}")
 
     clock = struct.unpack("<Q", bytes(rd(H.SYS_TIME, 8)))[0]
-    if not (H.TIMEOUT_VAL <= clock <= H.TIMEOUT_VAL + 2 * H.TICK):
-        p.append(f"shared clock {clock} did not poll past the {H.TIMEOUT_VAL} timeout")
+    if not (3 * H.TIMEOUT_VAL <= clock <= 3 * H.TIMEOUT_VAL + 6 * H.TICK):
+        p.append(f"shared clock {clock} did not poll past the 3x{H.TIMEOUT_VAL} timeout (3 beacon cycles)")
 
     return p
 
@@ -227,8 +227,8 @@ def main() -> int:
         return 1
 
     problems = dynamic_check(uc, blob)
-    if trace != [0x2B, 0x2B]:
-        problems.append(f"syscalls {[hex(n) for n in trace]} != [0x2B, 0x2B]")
+    if trace != [0x2B] * 6:
+        problems.append(f"syscalls {[hex(n) for n in trace]} != [0x2B]*6")
     for pr in problems:
         print(f"RUN FAIL: {pr}")
 

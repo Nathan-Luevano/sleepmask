@@ -222,6 +222,7 @@ public static class SleepmaskShell {
     Write-Host "    data_t0         = $(& $hx 90)   (stub clock snapshot, 100ns since 1601)"
     Write-Host "    delay_status    = $(& $hx 74)   (NTSTATUS of fallback NtDelayExecution)"
     Write-Host "    prot_status     = $(& $hx 66)   (NTSTATUS of NtProtectVirtualMemory; 0x2B success = 0)"
+    Write-Host "    beacon_cycles   = $(& $hx 226)   (beacon loop counter; 0 = all cycles done)"
     $sb = [SleepmaskShell]::ReadB($smem, $s.Length - 218, 16)
     Write-Host "    saved_bytes     = $($([System.BitConverter]::ToString($sb[0..11])).Replace('-',' '))   (the 12 original thunk bytes)"
   }

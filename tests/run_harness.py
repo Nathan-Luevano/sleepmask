@@ -31,10 +31,10 @@ it on is fine. Every one of the four entries must pass.
 
 PASS criteria (default, --fail-protect off):
   - the shellcode returns (RIP reaches RET_ADDR)
-  - the syscall trace is exactly [0x2B, 0x2B] (two NtProtect, no 0x3D)
+  - the syscall trace is exactly [0x2B]*6 (six NtProtect: 3 cycles x set+restore, no 0x3D)
   - every syscall had RSP ≡ 8 (mod 16) and ABI-shaped arguments
   - the NtProtect calls set RWX then restore the original protection
-  - done_flag (data slot 82 bytes from the blob tail) == 1
+  - done_flag (data slot 82 bytes from the blob tail) == 1; beacon_cycles (226) == 0
   - the original 12 bytes of NtDelayExecution are restored
   - the shared clock advanced past the 250 ms timeout (the mask slept)
 
@@ -107,6 +107,7 @@ TICK        = 100000           # 10 ms in 100ns units; one poll step
 TIMEOUT_VAL = 2500000          # the blob's timeout: 250 ms in 100ns units
 
 DONE_TAIL = 82                 # done_flag slot, bytes counted from the blob tail
+CYCLES_TAIL = 226              # beacon_cycles slot, bytes from the blob tail
 
 EXPORTS = [                     # (name, thunk RVA inside the PE)
     (b"NtDelayExecution\0",      0x1000),
@@ -301,12 +302,15 @@ def run_case(rsp0: int, blob: bytes, done_offset: int, fail_protect: bool = Fals
     nt_delay = rd(NTDLL_BASE + 0x1000, 12)
     expect_nt = make_thunk(0x3D)[:12]
     clock = struct.unpack("<Q", rd(SYS_TIME, 8))[0]
+    cycles_off = len(blob) - CYCLES_TAIL
+    cycles = struct.unpack("<Q", rd(SC_BASE + cycles_off, 8))[0]
 
     lines = [
         f"syscalls:    {' '.join('0x%02X' % n for n in trace)}",
         f"prot calls:  {' '.join('0x%02X' % p for p in prot_calls) or '(none)'}",
         f"final prot:  0x{kern['prot']:02X} (0x20 = original PAGE_EXECUTE_READ)",
         f"done_flag:   {done} (at blob offset {done_offset} / 0x{done_offset:X})",
+        f"beacon_cycles: {cycles} (at blob offset {cycles_off} / 0x{cycles_off:X})",
         f"sys_time:    {clock} (100ns units; timeout {TIMEOUT_VAL} = 250 ms)",
         f"ntdelay[12]: {nt_delay.hex(' ')}",
     ]
@@ -347,18 +351,24 @@ def run_case(rsp0: int, blob: bytes, done_offset: int, fail_protect: bool = Fals
         if clock != CLOCK0:
             lines.append(f"FAIL: clock {clock} advanced; the mask stub ran on the fallback path (want {CLOCK0})")
             ok = False
-    else:
-        if trace != [0x2B, 0x2B]:
-            lines.append(f"FAIL: syscalls {[hex(n) for n in trace]} != [0x2B, 0x2B] (want two NtProtect, no 0x3D)")
+        if cycles != 3:
+            lines.append(f"FAIL: beacon_cycles == {cycles}, expected 3 (fallback never enters the loop)")
             ok = False
-        if prot_calls != [0x40, 0x20]:
-            lines.append(f"FAIL: prot calls {[hex(p) for p in prot_calls]} != [0x40, 0x20] (set RWX then restore original)")
+    else:
+        if trace != [0x2B] * 6:
+            lines.append(f"FAIL: syscalls {[hex(n) for n in trace]} != [0x2B]*6 (want six NtProtect: 3 cycles x set+restore, no 0x3D)")
+            ok = False
+        if prot_calls != [0x40, 0x20] * 3:
+            lines.append(f"FAIL: prot calls {[hex(p) for p in prot_calls]} != [0x40, 0x20]*3 (3 cycles x set RWX then restore)")
             ok = False
         if kern["prot"] != 0x20:
             lines.append(f"FAIL: final prot 0x{kern['prot']:02X} != 0x20 (original protection not restored)")
             ok = False
-        if not (TIMEOUT_VAL <= clock <= TIMEOUT_VAL + 2 * TICK):
-            lines.append(f"FAIL: clock {clock} did not poll past the {TIMEOUT_VAL} timeout")
+        if not (3 * TIMEOUT_VAL <= clock <= 3 * TIMEOUT_VAL + 6 * TICK):
+            lines.append(f"FAIL: clock {clock} did not poll past the 3x{TIMEOUT_VAL} timeout (3 beacon cycles)")
+            ok = False
+        if cycles != 0:
+            lines.append(f"FAIL: beacon_cycles == {cycles}, expected 0 (loop must run to completion)")
             ok = False
     if ok:
         lines.append("PASS")
