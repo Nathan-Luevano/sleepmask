@@ -72,7 +72,6 @@ sym_base:
     cmp qword [r12 + (ntdll_base - sym_base)], 0
     jne .have_ntdll
     xor eax, eax
-    mov [r12 + (done_flag - sym_base)], rax
     jmp .exit
 
 .have_ntdll:
@@ -83,7 +82,6 @@ sym_base:
     lea r10, [r10 + 0x18]
     mov r11d, [r10 + 0x70]
     add r11, [r12 + (ntdll_base - sym_base)]
-    mov [r12 + (exp_dir - sym_base)], r11
     mov r10d, [r11 + 0x18]
     mov [r12 + (num_names - sym_base)], r10
     mov r9d, [r11 + 0x1C]
@@ -121,7 +119,8 @@ sym_base:
     ;   NtProtectVirtualMemory(NULL, &prot_base, &prot_size, 0x40, &saved_old_prot)
     ;   Windows x64 syscall ABI (direct `syscall`, not a `call`):
     ;     arg0 = RCX mirrored into R10, arg1 = RDX, arg2 = R8, arg3 = R9,
-    ;     arg4 = [RSP+0x28]; RSP must be 16-byte aligned at the `syscall`.
+    ;     arg4 = [RSP+0x28]; RSP must be ≡ 8 (mod 16) at the `syscall`,
+    ;     matching ntdll's own leaf thunks.
     mov r10, [r12 + (saved_ntdelay - sym_base)]
     mov [r12 + (prot_base - sym_base)], r10
     mov dword [r12 + (prot_size - sym_base)], 12
@@ -131,6 +130,7 @@ sym_base:
     ; preserved across the syscall, so it holds the restore point.
     mov r13, rsp                     ; r13 = S0 (restore point)
     and rsp, -16                     ; RSP = S0 & ~0xF (16-aligned, <= S0)
+    sub rsp, 8                       ; direct-syscall ABI: RSP ≡ 8 (mod 16)
     lea r10, [r12 + (saved_old_prot - sym_base)]
     mov [rsp + 0x28], r10            ; arg4 = &saved_old_prot (OldProtect, out)
     lea rdx, [r12 + (prot_base - sym_base)]   ; arg1 = BaseAddress*
@@ -141,6 +141,7 @@ sym_base:
     mov eax, [r12 + (data_nr_protect - sym_base)]
     syscall
     mov rsp, r13                     ; restore RSP = S0
+    mov dword [r12 + (prot_status - sym_base)], eax
     test eax, eax                    ; NTSTATUS: bit31 set = error/fatal
     jns .s6_patch                    ; success/warning -> go patch + mask
     ; NtProtect failed: the text isn't RWX, so we can't safely patch it in
@@ -150,6 +151,7 @@ sym_base:
     xor rcx, rcx                     ; arg0 = InState (0 = relative)
     mov rax, [r12 + (saved_ntdelay - sym_base)]
     call rax
+    mov dword [r12 + (delay_status - sym_base)], eax
     mov qword [r12 + (done_flag - sym_base)], 1
     jmp .exit
 .s6_patch:
@@ -178,6 +180,7 @@ sym_base:
     ;   into saved_old_prot, so we restore exactly what was there.
     mov r13, rsp                     ; r13 = S0 (restore point)
     and rsp, -16                     ; RSP = S0 & ~0xF (16-aligned, entry-independent)
+    sub rsp, 8                       ; direct-syscall ABI: RSP ≡ 8 (mod 16)
     lea r10, [r12 + (saved_old_prot - sym_base)]
     mov [rsp + 0x28], r10            ; arg4 = &saved_old_prot
     lea rdx, [r12 + (prot_base - sym_base)]   ; arg1 = BaseAddress* (pointer, like step 5)
@@ -248,7 +251,7 @@ stub_base_pop:
 cmp_ascii_ci:
     cmp rdx, r9
     jne .caci_no
-    mov r10, 0
+    xor r10d, r10d
 .caci_loop:
     movzx r11, byte [rsi + r10]
     movzx rax, byte [r8 + r10]
@@ -269,7 +272,8 @@ cmp_ascii_ci:
     inc r10
     cmp r10, rdx
     jb .caci_loop
-    mov rax, 1
+    push byte 1
+    pop rax
     ret
 .caci_ne:
     xor eax, eax
@@ -283,7 +287,7 @@ cmp_ascii_ci:
 cmp_u16_ci:
     cmp rdx, r9
     jne .cucu_no
-    mov r10, 0
+    xor r10d, r10d
 .cucu_loop:
     movzx r11, word [rsi + r10*2]
     movzx rax, word [r8 + r10*2]
@@ -402,6 +406,8 @@ data_nr_delay:  resq 1
 data_nr_protect:resq 1
 data_t0:        resq 1
 done_flag:      resq 1
+delay_status:   resq 1
+prot_status:    resq 1
 s_ntdelay:      db "NtDelayExecution", 0
 s_ntprotect:    db "NtProtectVirtualMemory", 0
 s_ntdll_u16:    dw 'n','t','d','l','l','.','d','l','l'
