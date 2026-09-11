@@ -57,6 +57,7 @@ from unicorn.x86_const import (
     UC_X86_REG_RCX,
     UC_X86_REG_R10,
     UC_X86_REG_R8,
+    UC_X86_REG_R9,
     UC_X86_REG_R15,
     UC_X86_REG_GS_BASE,
 )
@@ -337,21 +338,28 @@ def make_hook(nr_write, nr_create, nr_close, writes, abi_violations):
             uc_.reg_write(UC_X86_REG_RAX, 0)
             uc_.reg_write(UC_X86_REG_RIP, rip + 2)
         elif nr == nr_create:
-            # emulate nt!ObCreateFile validation: a rooted name (leading
-            # '\'), a NULL ExtraParameters (P12, [rsp+0x60]), and a
-            # disposition (P8, [rsp+0x40]) that is not FILE_OPEN (0) —
-            # the artifact does not pre-exist in this model.
+            # emulate nt!ObCreateFile validation. The kernel dereferences
+            # *FileHandle (rcx), ObjectAttributes (r8), *IoStatusBlock (r9),
+            # and the ObjectName UNICODE_STRING (oa->ObjectName) with
+            # naturally-aligned qword access, so a misaligned pointer is
+            # STATUS_DATATYPE_MISALIGNMENT (0x80000002) before any other check
+            # runs — this is what real Windows returned when the beacon's data
+            # section sat at a 4 (mod 8) offset.
             oa = uc_.reg_read(UC_X86_REG_R8)                 # r8 = ObjectAttributes
+            iosb = uc_.reg_read(UC_X86_REG_R9)               # r9 = IoStatusBlock
+            file_us = struct.unpack("<Q", bytes(uc_.mem_read(oa + 0x10, 8)))[0]
             name = read_file_name(uc_, oa)
             disp = struct.unpack("<Q", bytes(uc_.mem_read(rsp + 0x40, 8)))[0]
             extra = struct.unpack("<Q", bytes(uc_.mem_read(rsp + 0x60, 8)))[0]
             status = 0
-            if name is None or not name.startswith("\\"):
-                status = 0xC0000050          # STATUS_OBJECT_NAME_SYNTAX_ERROR
+            if rcx % 8 or oa % 8 or iosb % 8 or file_us % 8:
+                status = 0x80000002         # STATUS_DATATYPE_MISALIGNMENT
+            elif name is None or not name.startswith("\\"):
+                status = 0xC0000050         # STATUS_OBJECT_NAME_SYNTAX_ERROR
             elif extra != 0:
-                status = 0xC0000225          # STATUS_INVALID_PARAMETER
+                status = 0xC0000225         # STATUS_INVALID_PARAMETER
             elif disp == 0:
-                status = 0xC0000034          # STATUS_OBJECT_NAME_NOT_FOUND
+                status = 0xC0000034         # STATUS_OBJECT_NAME_NOT_FOUND
             uc_.mem_write(rcx, struct.pack("<Q", FILE_HDL if status == 0 else 0))
             writes.append(("create", name, status))
             uc_.reg_write(UC_X86_REG_RAX, status)
