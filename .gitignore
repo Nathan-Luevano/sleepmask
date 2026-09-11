@@ -15,11 +15,6 @@ __pycache__/
 .venv/
 .micromamba/
 
-# private session files (kept locally, not shipped)
-HANDOVER.md
-AGENTS.md
-blogs/
-
 # local environment / tooling
 .env
 .opencode/
