@@ -91,6 +91,9 @@ def check_consistency(expected, trace, present, absent):
 
 
 def main() -> int:
+    if not NTDLL.exists():
+        import make_ntfixture
+        make_ntfixture.main()
     data = NTDLL.read_bytes()
     offline = {row["name"]: row["value"] for row in syscall_table(data)}
     expected = {name: offline.get(name) for name in LABELS}
