@@ -30,6 +30,24 @@ The techniques are format-agnostic in the places that matter and deliberately
 per-format in the places that are not; the codebase is organized so that each
 claim is reproducible with one command.
 
+## Where this stands
+
+A work in progress, stated plainly up front:
+
+- **Linux (ELF x86-64) — proven on real hardware.** The static artifact is
+  built and executed for real; stdout and exit code are byte-checked. The
+  host-coupling graft runs on real metal (PIE and `-no-pie`).
+- **Windows (PE32+ x64) — emulated; native run in progress.** Every layer runs
+  to the CPU boundary in Unicorn from the real entry point. Native x64
+  Windows 11 verification is in progress: the payload's path has been
+  exercised on a real host, but a clean end-to-end run — including the
+  beacon's on-disk `sleepmask_beacon.txt` artifact — has not landed yet.
+- **macOS (Mach-O x86-64) — emulated; not yet run on real hardware.** Unicorn
+  only, at the nominal base and slid `+0x1000`.
+
+The Linux layer is native; the Windows/macOS layers are emulated up to the
+kernel boundary. That distinction is load-bearing everywhere below.
+
 ## What's in the repository
 
 | path | what it is |
@@ -122,17 +140,17 @@ the appenders' output is diff-checked against the input for that.
 |---|---|---|
 | **Linux artifact** | runs on a real kernel | built (`gcc -static`) and executed; stdout and exit code byte-checked |
 | **Linux host coupling** | the grafted host behaves | coupled ELF executed on real metal, PIE and `-no-pie`; beacon line precedes host line byte-exactly, host exit status (42) preserved, `PT_LOAD` count +1 |
-| **Windows artifact & coupling** | runs to the CPU boundary | full image loaded in Unicorn from its real entry point, with a hand-built PEB/ntdll and the kernel interface emulated at `syscall` (0F 05); asserted: syscall trace, done flag, byte-restore, beacon-before-host ordering, exit 42, GPR sentinels. The coupled image is run twice — with real and with decoy syscall numbers — proving the number is *read from the export prologue*, not assumed. **No native Windows execution yet.** |
+| **Windows artifact & coupling** | runs to the CPU boundary | full image loaded in Unicorn from its real entry point, with a hand-built PEB/ntdll and the kernel interface emulated at `syscall` (0F 05); asserted: syscall trace, done flag, byte-restore, beacon-before-host ordering, exit 42, GPR sentinels. The coupled image is run twice — with real and with decoy syscall   numbers — proving the number is *read from the export prologue*, not assumed. **Native verification in progress** — see *Where this stands* above. |
 | **macOS artifact & coupling** | runs to the CPU boundary | Unicorn with an XNU syscall-class emulator (`0x2000000 \| nr`), at the nominal base **and** slid `+0x1000`; independent generic load-command walker agrees with the static pass. **No native macOS execution yet.** |
 
-What "no native Windows/macOS execution yet" means, concretely: the images
-are structurally complete and execute correctly up to the kernel boundary
-under emulation, with every loader contract (PEB offsets, LDR entry layout,
-export-dir fields, stub prologue format, XNU class tags) taken from the
-documented ABI and exercised by the harness — but the one run that would
-close the loop on real hardware has not happened. That is the stated
-limitation of the Windows/macOS layers, and the reason they are emulated
-rather than asserted.
+What that verification gap means, concretely: the images are structurally
+complete and execute correctly up to the kernel boundary under emulation,
+with every loader contract (PEB offsets, LDR entry layout, export-dir fields,
+stub prologue format, XNU class tags) taken from the documented ABI and
+exercised by the harness — but the clean, end-to-end native run that would
+close the loop has not landed (and on macOS no native run has been attempted
+yet). That is the stated limitation of the Windows/macOS layers, and the
+reason they are emulated rather than asserted.
 
 ## The test matrix
 
@@ -165,12 +183,12 @@ Layer notes:
   the syscall trace (`0x2B` × 6 — three `NtProtectVirtualMemory` set/restore
   pairs), the done flag, the 78 `KUSER_SHARED_DATA` clock reads, and
   byte-identical restore of `NtDelayExecution`.
-- **windows-coupled** — `tools/append_pe.py` grafts the 1560-byte PIC beacon
+- **windows-coupled** — `tools/append_pe.py` grafts the 1564-byte PIC beacon
   onto a live host PE with a 10-byte trampoline and a new RWX `.bcon`
   section. The test asserts the beacon's stdout token precedes the host's own
   line, the beacon's `sleepmask_beacon.txt` artifact write, the host's exit
   code (42), and the R15 sentinel, under real and decoy syscall nr.
-- **windows-dll** — `tools/mk_dll.py` wraps the 1560-byte PIC beacon in a
+- **windows-dll** — `tools/mk_dll.py` wraps the 1564-byte PIC beacon in a
   PE32+ DLL (one RWX `.text`, no imports, no relocations → correct at any load
   base). The test validates the bytes, then loads the image at two bases in
   Unicorn and enters it the way `rundll32`/`regsvr32` would: `DllMain` →
@@ -237,10 +255,15 @@ precisely why the PE32+/Mach-O writers and appenders are Python.
 
 ## Status
 
-- Linux artifact + Linux host coupling: **proven on hardware**, byte-checked.
-- Windows/macOS artifacts + coupling: **proven to the CPU boundary** under
-  Unicorn (real entry points, real loader structures emulated, independent
-  readers agreeing). Remaining risk is in the native kernel/loader contract,
-  not in the code paths exercised.
-- The `research/pe/` toolchain is self-contained: `selftest.py` is green on a
-  fresh checkout with only the stdlib (+capstone for `disasm.py`).
+- **Linux artifact + Linux host coupling:** proven on hardware, byte-checked
+  (actual run).
+- **Windows artifact + coupling:** proven to the CPU boundary under Unicorn
+  (real entry points, real loader structures emulated, independent readers
+  agreeing). Native x64 Windows 11 verification is **in progress** — the
+  payload's path was exercised on a real host, but the beacon's
+  `sleepmask_beacon.txt` artifact write is the open item.
+- **macOS artifact + coupling:** proven to the CPU boundary under Unicorn
+  (nominal base and `+0x1000` slide). **Not yet run on real macOS hardware.**
+- The `research/pe/` toolchain is self-contained: `selftest.py` (18 checks)
+  and `crosscheck.py` regenerate their fixtures and are green on a fresh
+  checkout with only the stdlib (+capstone for `disasm.py`).
