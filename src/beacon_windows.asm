@@ -380,6 +380,7 @@ find_export:
 ; ---------------------------------------------------------------------------
 ; data (qword-aligned slots; strings at the end)
 ; ---------------------------------------------------------------------------
+align 8
 iosb:         resq 2
 ntdll_base:   resq 1
 eat_base:     resq 1
