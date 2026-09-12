@@ -1,0 +1,6 @@
+# region: file 0x4000 -> vaddr 0x6000   (host = gcc -O2, 16016 B, PIE)
+# first 48 bytes of the appended region: [trampoline:10][beacon...]
+
+00004000  e8 05 00 00 00 e9 d6 b0 ff ff 50 51 52 53 56 57   ..........PQRSVW
+00004010  55 41 50 41 51 41 52 41 53 41 54 41 55 41 56 41   UAPAQARASATAUAVA
+00004020  57 48 8d 35 29 00 00 00 bf 01 00 00 00 ba 33 00   WH.5).........3.

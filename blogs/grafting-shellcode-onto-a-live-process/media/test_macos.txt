@@ -1,0 +1,8 @@
+appended: __bcon vaddr 0x100002000, file 0x2000 (stub 10 B, blob 122 B, section 132 B)
+entry:    0x100001000 -> 0x100002000 (call blob, jmp old entry)
+segment:  nsects 1 -> 2, vmsize 0x2000 -> 0x3000
+static:   __bcon at new entry; stub=call+jmp; beacon byte-identical; __text untouched; LC_MAIN re-pointed
+walker:   independent command walk agrees (2 cmds, sizes, nsects)
+[base] writes=['sleepmask: coupled | macos x86-64 | host continues\n', 'host alive\n'] exit=42 rbx=ok r15=ok
+[slide] writes=['sleepmask: coupled | macos x86-64 | host continues\n', 'host alive\n'] exit=42 rbx=ok r15=ok
+PASS (macos host coupling: beacon fired first, host ran, exit 42 preserved, GPRs intact; base + slide)

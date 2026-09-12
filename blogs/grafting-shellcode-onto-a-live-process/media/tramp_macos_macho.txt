@@ -1,0 +1,5 @@
+# __bcon section: vaddr 0x100002000, file 0x2000, 132 B   (entry re-pointed 0x100001000 -> 0x100002000)
+# first 32 bytes at file 0x2000: [stub:10][beacon...]
+
+00002000  e8 05 00 00 00 e9 f6 ef ff ff 50 51 52 53 56 57   ..........PQRSVW
+00002010  55 41 50 41 51 41 52 41 53 41 54 41 55 41 56 41   UAPAQARASATAUAVA

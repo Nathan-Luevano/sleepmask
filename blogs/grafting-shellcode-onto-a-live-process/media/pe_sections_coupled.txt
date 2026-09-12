@@ -1,0 +1,4 @@
+# host_win.coupled.exe — PE section table (entry RVA 0x2000)
+
+  .text   VA 0x1000  vsize 0x03bb  raw 0x0200  rawsize 0x0400  chars 0xe0000020
+  .bcon   VA 0x2000  vsize 0x0622  raw 0x0600  rawsize 0x0800  chars 0xe0000020

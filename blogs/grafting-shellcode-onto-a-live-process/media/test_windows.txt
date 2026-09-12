@@ -1,0 +1,7 @@
+appended: .bcon RVA 0x2000, raw 0x600 (stub 10 B, blob 1560 B, section 2048 B)
+entry:    RVA 0x1000 -> 0x2000 (call blob, jmp old entry)
+image:    2 sections, headers 512 B, SizeOfImage 0x3000
+static:   .bcon RWX at new entry; stub=call+jmp; beacon byte-identical; .text untouched; reader ok
+[real] writes=['sleepmask: coupled | windows x86-64 | host continues\n', 'sleepmask: coupled | windows x86-64 | host continues\n', 'host alive\n'] created=[('\\sleepmask_beacon.txt', 0)] exit=42 r15=ok
+[decoy] writes=['sleepmask: coupled | windows x86-64 | host continues\n', 'sleepmask: coupled | windows x86-64 | host continues\n', 'host alive\n'] created=[('\\sleepmask_beacon.txt', 0)] exit=42 r15=ok
+PASS (windows host coupling: beacon fired first -> stdout AND \sleepmask_beacon.txt; host ran, exit 42 + r15 preserved; real + decoy nr)

@@ -1,0 +1,9 @@
+  ok  pie: beacon + host output, byte-exact
+  ok  pie: host exit status preserved (42)
+  ok  pie: pristine host still rc=42
+  ok  no-pie: beacon + host output, byte-exact
+  ok  no-pie: host exit status preserved (42)
+  ok  no-pie: pristine host still rc=42
+  ok  coupled: PT_LOAD count +1
+  info coupled entry: 0x6000
+PASS (linux host coupling: beacon fired, host ran, exit code preserved, PIE + no-pie)

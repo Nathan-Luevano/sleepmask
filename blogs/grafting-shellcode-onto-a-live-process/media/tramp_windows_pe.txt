@@ -1,0 +1,5 @@
+# .bcon section: RVA 0x2000, raw 0x800, 1024 B   (entry re-pointed 0x1000 -> 0x2000)
+# first 32 bytes at raw 0x800: [stub:10][beacon...]
+
+00000600  e8 05 00 00 00 e9 f6 ef ff ff 50 51 52 53 56 57   ..........PQRSVW
+00000610  55 41 50 41 51 41 52 41 53 41 54 41 55 41 56 41   UAPAQARASATAUAVA
