@@ -5,6 +5,6 @@ cd "$(dirname "$0")"
 mkdir -p build
 for src in src/*.asm; do
   name="$(basename "${src%.asm}")"
-  nasm -g -f bin -o "build/${name}.bin" "${src}"
+  nasm -g -f bin -o "build/${name}.bin" "${src}" -w-=zeroing
   echo "assembled build/${name}.bin ($(stat -c%s "build/${name}.bin") bytes)"
 done

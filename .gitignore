@@ -28,3 +28,6 @@ node_modules/
 
 # curated .onion store directory (local reference only)
 research/onion_directory.md
+
+# public-version authoring cruft: blogs + its media tree, local only
+blogs/
