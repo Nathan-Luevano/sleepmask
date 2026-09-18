@@ -267,3 +267,13 @@ precisely why the PE32+/Mach-O writers and appenders are Python.
 - The `research/pe/` toolchain is self-contained: `selftest.py` (18 checks)
   and `crosscheck.py` regenerate their fixtures and are green on a fresh
   checkout with only the stdlib (+capstone for `disasm.py`).
+
+## This repo and its sibling
+
+This is the **public mirror**: the family code (`src/`, `tools/`, `tests/`,
+`research/pe/`) with a clean README and no internal development notes. The
+**canonical repo** (`~/repos/m-dev`) holds the same family plus the full
+development history — the blog posts, repo rules (AGENTS.md), session handover
+(HANDOVER.md), and private-session `.env`. The two are byte-identical in their
+family layer; `m-dev` is where the writing and the session state live, and this
+repo is the clean, forward-facing copy.
